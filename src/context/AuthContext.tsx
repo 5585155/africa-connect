@@ -1,7 +1,29 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
-import { isSupabaseConfigured, supabase } from '../lib/supabase'
+import { isSupabaseConfigured, supabase, supabaseUrl } from '../lib/supabase'
 import type { AuthUser, Role } from '../types'
+
+/**
+ * Logs enough context to diagnose a failed Supabase Auth call without ever
+ * logging the anon key or password. `supabaseUrl` is safe to log — it's a
+ * public project URL, not a secret — and is the first thing to check: this
+ * exact error shows up whenever it has a trailing slash or an extra path
+ * segment on it (see src/lib/supabase.ts for the sanitization/validation).
+ */
+function logAuthError(action: 'signUp' | 'signIn', error: { message: string; status?: number }) {
+  console.error(`[AuthContext] ${action} failed`, {
+    message: error.message,
+    status: error.status,
+    supabaseUrl,
+  })
+  if (/invalid path/i.test(error.message)) {
+    console.error(
+      '[AuthContext] This specific error means the request URL sent to Supabase was malformed — ' +
+        `check VITE_SUPABASE_URL in your deployment's environment variables. Current sanitized value: "${supabaseUrl}". ` +
+        'It must be exactly the project URL (e.g. "https://your-project-ref.supabase.co") with no trailing slash and no path.',
+    )
+  }
+}
 
 interface SignUpParams {
   name: string
@@ -113,9 +135,18 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         const { data, error } = await supabase!.auth.signUp({
           email,
           password,
-          options: { data: { full_name: name, role } },
+          options: {
+            data: { full_name: name, role },
+            // Explicit, guaranteed-valid absolute URL — never build this by
+            // concatenating strings, and don't rely on whatever Site URL
+            // happens to be configured in the Supabase dashboard.
+            emailRedirectTo: window.location.origin,
+          },
         })
-        if (error) return { error: error.message }
+        if (error) {
+          logAuthError('signUp', error)
+          return { error: error.message }
+        }
         if (data.session && data.user) {
           const profile = await fetchProfile(data.user.id, email)
           setUser(profile)
@@ -125,7 +156,10 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       },
       signIn: async ({ email, password }) => {
         const { data, error } = await supabase!.auth.signInWithPassword({ email, password })
-        if (error) return { error: error.message }
+        if (error) {
+          logAuthError('signIn', error)
+          return { error: error.message }
+        }
         if (!data.user) return {}
         const profile = await fetchProfile(data.user.id, email)
         setUser(profile)
