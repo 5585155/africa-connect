@@ -25,6 +25,18 @@ create table if not exists public.profiles (
 
 -- Auto-create a profile row whenever a new auth user signs up, reading the
 -- full_name/role passed in via `options.data` on supabase.auth.signUp().
+--
+-- This runs inside the SAME transaction as the `auth.users` insert — an
+-- uncaught exception here rolls back the whole signup and Supabase Auth
+-- surfaces it to the client as the generic "Database error saving new user",
+-- with no detail. Common causes: `role` outside the allowed check-constraint
+-- values, an empty-string `full_name`, or a retried signup colliding with
+-- the `profiles.email` unique constraint (`on conflict (id)` only guards
+-- against an `id` collision, not an `email` one). The exception handler
+-- below means none of those can ever fail the auth account creation itself —
+-- worst case, the profile row is missing or stale, which
+-- src/context/AuthContext.tsx's fetchProfile already tolerates, and can
+-- self-heal via its client-side upsert fallback.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -35,11 +47,21 @@ begin
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)),
-    coalesce(new.raw_user_meta_data ->> 'role', 'buyer')
+    coalesce(nullif(new.raw_user_meta_data ->> 'full_name', ''), split_part(new.email, '@', 1)),
+    case
+      when new.raw_user_meta_data ->> 'role' in ('farmer', 'buyer') then new.raw_user_meta_data ->> 'role'
+      else 'buyer'
+    end
   )
-  on conflict (id) do nothing;
+  on conflict (id) do update
+    set email = excluded.email,
+        full_name = excluded.full_name,
+        role = excluded.role;
   return new;
+exception
+  when others then
+    raise warning 'handle_new_user: could not create/update profile for % (%): % (%)', new.id, new.email, sqlerrm, sqlstate;
+    return new;
 end;
 $$;
 
@@ -193,6 +215,16 @@ create policy "profiles are readable by authenticated users"
   on public.profiles for select
   to authenticated
   using (true);
+
+-- Normally unnecessary — handle_new_user() (security definer) creates the
+-- row — but this lets AuthContext's client-side upsert fallback self-heal a
+-- signup whose trigger row never landed, without needing another security
+-- definer function.
+drop policy if exists "users can insert their own profile" on public.profiles;
+create policy "users can insert their own profile"
+  on public.profiles for insert
+  to authenticated
+  with check (auth.uid() = id);
 
 drop policy if exists "users can update their own profile" on public.profiles;
 create policy "users can update their own profile"

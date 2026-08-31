@@ -23,6 +23,16 @@ function logAuthError(action: 'signUp' | 'signIn', error: { message: string; sta
         'It must be exactly the project URL (e.g. "https://your-project-ref.supabase.co") with no trailing slash and no path.',
     )
   }
+  if (/database error saving new user/i.test(error.message)) {
+    console.error(
+      '[AuthContext] This means the on_auth_user_created trigger (handle_new_user() in supabase/schema.sql) ' +
+        'raised an exception while inserting into profiles, which rolled back the whole signup — Supabase Auth ' +
+        "never exposes the underlying Postgres error to the client, so check your project's Supabase Dashboard → " +
+        'Logs → Postgres Logs for the real error/code. Common causes: supabase/schema.sql (or an update to it) ' +
+        'was never run against this project, or profiles.email already has a row for this address from an ' +
+        'earlier failed attempt. Re-running supabase/schema.sql is safe and idempotent.',
+    )
+  }
 }
 
 interface SignUpParams {
@@ -90,6 +100,62 @@ async function fetchProfile(userId: string, email: string): Promise<AuthUser> {
   return { id: userId, name: data.full_name, email, role: data.role as Role }
 }
 
+/**
+ * Used right after signUp: reads the profile handle_new_user() should have
+ * created, and — since that trigger can legitimately end up not writing a
+ * row (its own exception handler in supabase/schema.sql swallows failures so
+ * it never blocks account creation) — self-heals with a client-side upsert
+ * if it's missing, via the "users can insert their own profile" RLS policy.
+ * Logs the real Postgres error code/details/hint on failure, since this path
+ * (unlike auth.signUp's own errors) gets the actual PostgREST error object.
+ */
+async function ensureProfile(userId: string, email: string, name: string, role: Role): Promise<AuthUser> {
+  const { data: existing, error: selectError } = await supabase!
+    .from('profiles')
+    .select('full_name, role')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (selectError) {
+    console.error('[AuthContext] profile lookup failed after signUp', {
+      code: selectError.code,
+      message: selectError.message,
+      details: selectError.details,
+      hint: selectError.hint,
+    })
+  }
+
+  if (existing) {
+    return { id: userId, name: existing.full_name, email, role: existing.role as Role }
+  }
+
+  console.warn('[AuthContext] no profile row found after signUp — the trigger may have failed; self-healing with a client-side upsert')
+  const fallbackName = name.trim() || email.split('@')[0] || 'there'
+
+  try {
+    const { data: upserted, error: upsertError } = await supabase!
+      .from('profiles')
+      .upsert({ id: userId, email, full_name: fallbackName, role }, { onConflict: 'id' })
+      .select('full_name, role')
+      .single()
+
+    if (upsertError) {
+      console.error('[AuthContext] fallback profile upsert failed', {
+        code: upsertError.code,
+        message: upsertError.message,
+        details: upsertError.details,
+        hint: upsertError.hint,
+      })
+      return { id: userId, name: fallbackName, email, role }
+    }
+
+    return { id: userId, name: upserted.full_name, email, role: upserted.role as Role }
+  } catch (error) {
+    console.error('[AuthContext] fallback profile upsert threw', error)
+    return { id: userId, name: fallbackName, email, role }
+  }
+}
+
 function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
@@ -148,7 +214,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           return { error: error.message }
         }
         if (data.session && data.user) {
-          const profile = await fetchProfile(data.user.id, email)
+          const profile = await ensureProfile(data.user.id, email, name, role)
           setUser(profile)
           return { role: profile.role }
         }
