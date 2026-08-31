@@ -1,6 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+// A trailing slash (e.g. pasted straight from the Supabase dashboard as
+// "https://xyz.supabase.co/") makes supabase-js build request URLs with a
+// double slash before the API path — some proxies/CDNs reject that with
+// "Invalid path specified in request URL". Trim it before it ever reaches createClient.
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '')
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 /**
