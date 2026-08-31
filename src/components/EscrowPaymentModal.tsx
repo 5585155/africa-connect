@@ -4,6 +4,7 @@ import { useCurrency } from '../context/CurrencyContext'
 import { formatMoney, type ConverterCurrency } from '../lib/currency'
 import { isFlutterwaveConfigured, openFlutterwaveCheckout } from '../lib/flutterwave'
 import { getStripe, isStripeConfigured } from '../lib/stripe'
+import PaystackButton, { isPaystackConfigured } from './PaystackButton'
 
 const LOGISTICS_RATE_PER_TON = 18
 const ESCROW_FEE_RATE = 0.025
@@ -20,7 +21,7 @@ export function computeEscrowBreakdown(quantity: number, unitPriceUSD: number) {
   return { cropCostUSD, logisticsUSD, escrowFeeUSD, totalUSD }
 }
 
-export type PaymentMethod = 'flutterwave' | 'stripe'
+export type PaymentMethod = 'flutterwave' | 'stripe' | 'paystack'
 
 export interface EscrowPaymentResult {
   method: PaymentMethod
@@ -30,6 +31,9 @@ export interface EscrowPaymentResult {
 
 /** Currencies Flutterwave's inline checkout actually settles in — anything else falls back to USD for the charge itself. */
 const FLUTTERWAVE_CURRENCIES: ConverterCurrency[] = ['USD', 'KES', 'NGN', 'GHS']
+
+/** Currencies Paystack's inline checkout actually settles in — anything else falls back to NGN for the charge itself. */
+const PAYSTACK_CURRENCIES: ConverterCurrency[] = ['NGN', 'GHS', 'USD']
 
 const PAYMENT_METHODS: {
   id: PaymentMethod
@@ -48,6 +52,12 @@ const PAYMENT_METHODS: {
     label: 'Stripe',
     description: 'Credit/debit card or wire transfer — best for USD/EUR buyers',
     icon: '💳',
+  },
+  {
+    id: 'paystack',
+    label: 'Paystack',
+    description: 'Cards, bank transfer, and USSD — popular across Nigeria and Ghana',
+    icon: '💰',
   },
 ]
 
@@ -70,6 +80,9 @@ export default function EscrowPaymentModal({
   const { currency, convert } = useCurrency()
   const { cropCostUSD, logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(quantity, unitPriceUSD)
   const convertedTotal = convert(totalUSD, 'USD', currency)
+
+  const paystackCurrency = PAYSTACK_CURRENCIES.includes(currency) ? currency : 'NGN'
+  const paystackAmount = convert(totalUSD, 'USD', paystackCurrency)
 
   const [complianceChecked, setComplianceChecked] = useState(false)
   const [method, setMethod] = useState<PaymentMethod | null>(null)
@@ -220,7 +233,16 @@ export default function EscrowPaymentModal({
             <div className="flex flex-col gap-2">
               {PAYMENT_METHODS.map((option) => {
                 const active = method === option.id
-                const sandbox = option.id === 'flutterwave' ? !isFlutterwaveConfigured : !isStripeConfigured
+                const configured =
+                  option.id === 'flutterwave'
+                    ? isFlutterwaveConfigured
+                    : option.id === 'stripe'
+                      ? isStripeConfigured
+                      : isPaystackConfigured
+                // Flutterwave/Stripe simulate a successful charge when unconfigured so the
+                // escrow flow can still be tested end to end; Paystack has no such fallback
+                // (a pk_test_... key already gives a real sandbox), so it's just disabled.
+                const badgeLabel = configured ? null : option.id === 'paystack' ? 'Not configured' : 'Sandbox'
                 return (
                   <button
                     key={option.id}
@@ -238,9 +260,9 @@ export default function EscrowPaymentModal({
                     <span className="flex-1">
                       <span className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-earth-950">{option.label}</span>
-                        {sandbox && (
+                        {badgeLabel && (
                           <span className="rounded-full bg-clay-600/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-clay-700">
-                            Sandbox
+                            {badgeLabel}
                           </span>
                         )}
                       </span>
@@ -264,6 +286,12 @@ export default function EscrowPaymentModal({
                 simulate a successful payment so you can test the escrow flow end to end.
               </p>
             )}
+            {method === 'paystack' && !isPaystackConfigured && (
+              <p className="mt-2 rounded-lg bg-sand-50 p-2.5 text-xs text-earth-700">
+                ⚠️ No VITE_PAYSTACK_PUBLIC_KEY configured on this deployment — Paystack has no built-in simulation,
+                so a pk_test_... key is needed to test this path.
+              </p>
+            )}
           </div>
 
           {errorMessage && (
@@ -284,20 +312,34 @@ export default function EscrowPaymentModal({
             >
               Cancel
             </button>
-            <button
-              type="button"
-              disabled={!canPay}
-              onClick={handlePay}
-              className="flex-1 rounded-xl bg-earth-800 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-earth-700/60"
-            >
-              {status === 'processing'
-                ? 'Processing…'
-                : !method
-                  ? 'Select a payment method'
-                  : methodIsSandbox
-                    ? `Simulate ${method === 'flutterwave' ? 'Flutterwave' : 'Stripe'} Payment`
-                    : `Pay with ${method === 'flutterwave' ? 'Flutterwave' : 'Stripe'}`}
-            </button>
+
+            {method === 'paystack' ? (
+              <PaystackButton
+                className="flex-1"
+                disabled={!complianceChecked}
+                email={user?.email ?? ''}
+                amount={paystackAmount}
+                currency={paystackCurrency}
+                userId={user?.id ?? user?.email ?? ''}
+                label="Pay with Paystack"
+                onSuccessCallback={(reference) => onConfirm({ method: 'paystack', reference, sandbox: false })}
+              />
+            ) : (
+              <button
+                type="button"
+                disabled={!canPay}
+                onClick={handlePay}
+                className="flex-1 rounded-xl bg-earth-800 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-earth-700/60"
+              >
+                {status === 'processing'
+                  ? 'Processing…'
+                  : !method
+                    ? 'Select a payment method'
+                    : methodIsSandbox
+                      ? `Simulate ${method === 'flutterwave' ? 'Flutterwave' : 'Stripe'} Payment`
+                      : `Pay with ${method === 'flutterwave' ? 'Flutterwave' : 'Stripe'}`}
+              </button>
+            )}
           </div>
         </div>
       </div>

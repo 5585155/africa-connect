@@ -159,6 +159,24 @@ create table if not exists public.watchlist (
 );
 
 -- ─────────────────────────────────────────────────────────────────────────
+-- transactions — completed gateway charges (currently: Paystack `charge.success`)
+-- ─────────────────────────────────────────────────────────────────────────
+create table if not exists public.transactions (
+  id uuid primary key default gen_random_uuid(),
+  reference text not null unique,
+  provider text not null default 'paystack' check (provider in ('paystack')),
+  user_id uuid references public.profiles (id) on delete set null,
+  email text not null,
+  amount numeric not null,
+  currency text not null default 'NGN',
+  status text not null default 'success' check (status in ('success', 'failed', 'pending')),
+  raw_event jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists transactions_user_id_idx on public.transactions (user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────
 -- Row Level Security
 -- ─────────────────────────────────────────────────────────────────────────
 alter table public.profiles enable row level security;
@@ -167,6 +185,7 @@ alter table public.conversations enable row level security;
 alter table public.messages enable row level security;
 alter table public.orders enable row level security;
 alter table public.watchlist enable row level security;
+alter table public.transactions enable row level security;
 
 -- profiles: readable by any signed-in user (names shown on listings/threads); writable only by the owner
 drop policy if exists "profiles are readable by authenticated users" on public.profiles;
@@ -270,6 +289,15 @@ create policy "users manage their own watchlist"
   to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- transactions: read-only to the owning user; every row is written by the
+-- Paystack webhook via the service role client, which bypasses RLS entirely,
+-- so there's deliberately no insert/update/delete policy for regular users.
+drop policy if exists "users can read their own transactions" on public.transactions;
+create policy "users can read their own transactions"
+  on public.transactions for select
+  to authenticated
+  using (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Realtime — stream inserts/updates to subscribed clients

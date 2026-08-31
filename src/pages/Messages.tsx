@@ -52,7 +52,7 @@ export default function Messages() {
     const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, activeOrder.unitPriceUSD)
     fundEscrow(activeOrder.id, { logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
 
-    const gateway = result.method === 'flutterwave' ? 'Flutterwave' : 'Stripe'
+    const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
     sendMessage(
       activeThread.id,
       `Funded escrow trade for ${activeOrder.quantity} t ${activeOrder.cropName} via ${gateway}${
