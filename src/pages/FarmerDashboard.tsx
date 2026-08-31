@@ -1,4 +1,5 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
+import ChartFallback from '../components/ChartFallback'
 import OrderStatusTracker from '../components/OrderStatusTracker'
 import { useAuth } from '../context/AuthContext'
 import { useCrops } from '../context/CropContext'
@@ -6,6 +7,8 @@ import { useOrders } from '../context/OrdersContext'
 import { CERTIFICATION_OPTIONS } from '../data/sellerListings'
 import type { CropCategory, ListingStatus, SellerListing } from '../types'
 import { ORDER_STAGES } from '../types'
+
+const AIPricingRadar = lazy(() => import('../components/AIPricingRadar'))
 
 const CATEGORIES: CropCategory[] = [
   'Grains',
@@ -152,6 +155,12 @@ export default function FarmerDashboard() {
         <MetricCard label="Total Inquiries" value={metrics.totalInquiries} />
         <MetricCard label="Pending Escrow Trades" value={metrics.pendingEscrowTrades} />
         <MetricCard label="Total Revenue" value={`$${metrics.totalRevenue.toLocaleString()}`} />
+      </div>
+
+      <div className="mt-10">
+        <Suspense fallback={<ChartFallback height={280} />}>
+          <AIPricingRadar listings={myListings} />
+        </Suspense>
       </div>
 
       <div id="listing-form" className="mt-10 rounded-2xl border border-sand-200 bg-white p-6">

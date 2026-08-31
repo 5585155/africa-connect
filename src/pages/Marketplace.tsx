@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import CategoryTabs from '../components/CategoryTabs'
 import CropCard from '../components/CropCard'
+import MarketAnalyticsBanner from '../components/MarketAnalyticsBanner'
 import PriceRangeSlider from '../components/PriceRangeSlider'
 import { useCrops } from '../context/CropContext'
 import { DEFAULT_FILTERS, filterCrops } from '../lib/filterCrops'
@@ -56,6 +57,8 @@ export default function Marketplace() {
         <h1 className="text-3xl font-bold text-earth-950">Marketplace</h1>
         <p className="mt-1 text-earth-700">Browse every listing and narrow down with advanced filters.</p>
       </div>
+
+      <MarketAnalyticsBanner listings={listings} />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[280px_1fr]">
         <aside className="h-fit rounded-2xl border border-sand-200 bg-white p-5">

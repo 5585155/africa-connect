@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCurrency } from '../context/CurrencyContext'
@@ -6,6 +6,9 @@ import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
 import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
 import type { SellerListing } from '../types'
+import ChartFallback from './ChartFallback'
+
+const PriceTrendChart = lazy(() => import('./PriceTrendChart'))
 
 export default function ProductDetailModal({
   listing,
@@ -192,6 +195,12 @@ export default function ProductDetailModal({
               )}
             </div>
           )}
+
+          <div className="mt-5">
+            <Suspense fallback={<ChartFallback height={340} />}>
+              <PriceTrendChart listingId={listing.id} cropName={listing.cropName} unitPriceUSD={listing.unitPriceUSD} />
+            </Suspense>
+          </div>
 
           <div className="mt-6 rounded-xl border border-sand-200 p-4">
             <h3 className="mb-3 text-sm font-semibold text-earth-950">Currency converter</h3>
