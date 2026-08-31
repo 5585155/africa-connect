@@ -6,7 +6,7 @@ import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
 
 export default function Messages() {
-  const { threads, sendMessage } = useMessaging()
+  const { threads, loading, sendMessage } = useMessaging()
   const { getOrderByThread, fundEscrow } = useOrders()
   const [searchParams, setSearchParams] = useSearchParams()
   const [activeId, setActiveId] = useState<string | null>(searchParams.get('thread'))
@@ -42,7 +42,7 @@ export default function Messages() {
   function handleSendOffer(event: FormEvent) {
     event.preventDefault()
     if (!activeThread || !offerPrice) return
-    sendMessage(activeThread.id, `Counter-offer: $${offerPrice} / ton`, 'offer')
+    sendMessage(activeThread.id, `Counter-offer: $${offerPrice} / ton`, 'offer', Number(offerPrice))
     setOfferPrice('')
     setShowOfferInput(false)
   }
@@ -57,6 +57,17 @@ export default function Messages() {
       'escrow',
     )
     setShowEscrowModal(false)
+  }
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-24 text-center text-earth-700">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-earth-800/10 text-2xl">
+          💬
+        </div>
+        <p className="mt-4">Loading your conversations…</p>
+      </div>
+    )
   }
 
   if (threads.length === 0) {

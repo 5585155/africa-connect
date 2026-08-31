@@ -38,9 +38,15 @@ export default function FarmerDashboard() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
-  const myListings = useMemo(() => listings.filter((l) => l.farmerName === user?.name), [listings, user])
+  const myListings = useMemo(
+    () => listings.filter((l) => (user?.id ? l.farmerId === user.id : l.farmerName === user?.name)),
+    [listings, user],
+  )
   const myOrders = useMemo(
-    () => orders.filter((o) => o.farmerName === user?.name).sort((a, b) => b.createdAt - a.createdAt),
+    () =>
+      orders
+        .filter((o) => (user?.id ? o.farmerId === user.id : o.farmerName === user?.name))
+        .sort((a, b) => b.createdAt - a.createdAt),
     [orders, user],
   )
 

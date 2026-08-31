@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import type { Role } from '../types'
 
 export default function Auth() {
-  const { login } = useAuth()
+  const { signUp, signIn } = useAuth()
   const navigate = useNavigate()
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signup')
@@ -12,12 +12,43 @@ export default function Auth() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [checkEmail, setCheckEmail] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    const displayName = name.trim() || email.split('@')[0] || 'there'
-    login({ name: displayName, email, role })
-    navigate(role === 'farmer' ? '/farmer/dashboard' : '/buyer/dashboard')
+    setError(null)
+    setSubmitting(true)
+
+    const result =
+      mode === 'signup' ? await signUp({ name, email, password, role }) : await signIn({ email, password, role })
+
+    setSubmitting(false)
+
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    if (result.needsEmailConfirmation) {
+      setCheckEmail(true)
+      return
+    }
+    navigate((result.role ?? role) === 'farmer' ? '/farmer/dashboard' : '/buyer/dashboard')
+  }
+
+  if (checkEmail) {
+    return (
+      <div className="mx-auto flex max-w-md flex-col px-4 py-24 text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-earth-800/10 text-2xl">
+          📬
+        </div>
+        <h1 className="mt-4 text-2xl font-bold text-earth-950">Check your email</h1>
+        <p className="mt-2 text-earth-700">
+          We sent a confirmation link to <strong>{email}</strong>. Confirm it, then come back and log in.
+        </p>
+      </div>
+    )
   }
 
   return (
@@ -71,6 +102,11 @@ export default function Auth() {
               </button>
             ))}
           </div>
+          {mode === 'signin' && (
+            <p className="mt-1.5 text-xs text-earth-700/60">
+              Only used as a fallback when no backend is connected — a real account's role comes from your profile.
+            </p>
+          )}
         </div>
 
         {mode === 'signup' && (
@@ -119,15 +155,24 @@ export default function Auth() {
           />
         </div>
 
+        {error && (
+          <p role="alert" className="rounded-lg bg-clay-600/10 px-3 py-2 text-sm text-clay-700">
+            {error}
+          </p>
+        )}
+
         <button
           type="submit"
-          className="mt-2 rounded-xl bg-earth-800 py-3 text-sm font-semibold text-white transition-colors hover:bg-earth-700"
+          disabled={submitting}
+          className="mt-2 rounded-xl bg-earth-800 py-3 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {mode === 'signin' ? 'Log In' : `Create ${role} account`}
+          {submitting ? 'Please wait…' : mode === 'signin' ? 'Log In' : `Create ${role} account`}
         </button>
 
         <p className="text-center text-xs text-earth-700/70">
-          This is a demo — no real account is created and passwords aren't stored.
+          {mode === 'signin'
+            ? "Signing in doesn't change your account role — it's set when you sign up."
+            : 'Your account is created for real when a Supabase project is connected; otherwise this is a local demo session.'}
         </p>
       </form>
     </div>

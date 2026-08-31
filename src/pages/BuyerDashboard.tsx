@@ -16,7 +16,10 @@ export default function BuyerDashboard() {
   const { savedIds } = useWatchlist()
 
   const myOrders = useMemo(
-    () => orders.filter((o) => o.buyerName === user?.name).sort((a, b) => b.createdAt - a.createdAt),
+    () =>
+      orders
+        .filter((o) => (user?.id ? o.buyerId === user.id : o.buyerName === user?.name))
+        .sort((a, b) => b.createdAt - a.createdAt),
     [orders, user],
   )
   const savedListings = useMemo(() => listings.filter((l) => savedIds.includes(l.id)), [listings, savedIds])

@@ -36,27 +36,31 @@ export default function ProductDetailModal({
   const totalUSD = listing.unitPriceUSD * quantity
   const converted = convertFromUSD(totalUSD, currency)
 
-  function handleContactFarmer() {
+  async function handleContactFarmer() {
     if (!user) {
       onClose()
       navigate('/auth')
       return
     }
 
-    const threadId = startThread({
+    const threadId = await startThread({
       listingId: listing.id,
       cropName: listing.cropName,
       counterpartName: listing.farmerName,
+      counterpartId: listing.farmerId,
       initialMessage: `Hi ${listing.farmerName}, I'm interested in your ${listing.cropName} — is ${quantity} ton${
         quantity === 1 ? '' : 's'
       } still available at $${listing.unitPriceUSD.toLocaleString()}/ton?`,
     })
+
+    if (!threadId) return
 
     createOrder({
       threadId,
       listingId: listing.id,
       cropName: listing.cropName,
       farmerName: listing.farmerName,
+      farmerId: listing.farmerId,
       buyerName: user.name,
       quantity,
       unitPriceUSD: listing.unitPriceUSD,

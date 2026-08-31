@@ -4,7 +4,18 @@ import { useAuth } from '../context/AuthContext'
 import type { Role } from '../types'
 
 export default function ProtectedRoute({ role, children }: { role: Role; children: ReactNode }) {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-24 text-center text-earth-700">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-earth-800/10 text-2xl">
+          🔒
+        </div>
+        <p className="mt-4">Loading your session…</p>
+      </div>
+    )
+  }
 
   if (!user || user.role !== role) {
     return (

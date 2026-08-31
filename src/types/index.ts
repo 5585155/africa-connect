@@ -36,6 +36,8 @@ export interface CropListing {
   availableQuantity: number
   unitPriceUSD: number
   farmerName: string
+  /** Supabase profile id of the owning farmer. Undefined for local mock listings. */
+  farmerId?: string
   verifiedStatus: boolean
   harvestDate: string
   image: string
@@ -47,6 +49,8 @@ export interface CropListing {
 }
 
 export interface AuthUser {
+  /** Supabase auth user id. Undefined when running on local mock storage. */
+  id?: string
   name: string
   email: string
   role: Role
@@ -74,6 +78,9 @@ export interface Order {
   cropName: string
   farmerName: string
   buyerName: string
+  /** Supabase profile ids of both parties. Undefined for local mock orders — filter on name instead. */
+  farmerId?: string
+  buyerId?: string
   quantity: number
   unitPriceUSD: number
   logisticsUSD: number
