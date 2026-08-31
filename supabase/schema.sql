@@ -84,6 +84,11 @@ create table if not exists public.conversations (
   unique (buyer_id, crop_id)
 );
 
+-- buyer_id is already covered by the leftmost column of the unique(buyer_id,
+-- crop_id) constraint above; farmer_id has no such coverage, and
+-- MessagingContext's `.or(buyer_id.eq.X, farmer_id.eq.X)` query needs both sides indexed.
+create index if not exists idx_conversations_farmer_id on public.conversations (farmer_id);
+
 -- ─────────────────────────────────────────────────────────────────────────
 -- messages — chat + counter-offer + escrow-request events within a thread
 -- ─────────────────────────────────────────────────────────────────────────

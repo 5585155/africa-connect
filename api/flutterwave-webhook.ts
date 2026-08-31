@@ -62,14 +62,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Database is not configured on this deployment' })
   }
 
-  const { error } = await supabaseAdmin
+  const { data: updated, error } = await supabaseAdmin
     .from('orders')
     .update({ escrow_status: 'Escrow Funded', receipt_reference: data.tx_ref ?? data.flw_ref ?? String(data.id) })
     .eq('id', orderId)
+    .select()
 
   if (error) {
     console.error('[flutterwave-webhook] failed to update order', orderId, error)
     return res.status(500).json({ error: 'Failed to update order' })
+  }
+
+  if (!updated || updated.length === 0) {
+    // Row-count check — Supabase returns no error for an .update() that
+    // matches zero rows, so an unmatched order_id would otherwise look like
+    // a success and silently drop a real payment event.
+    console.error('[flutterwave-webhook] successful charge referenced an unknown order_id', orderId)
+    return res.status(404).json({ error: 'Order not found for order_id' })
   }
 
   return res.status(200).json({ received: true })
