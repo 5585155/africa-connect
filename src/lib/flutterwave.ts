@@ -20,6 +20,8 @@ interface FlutterwaveConfig {
   payment_options?: string
   customer: FlutterwaveCustomer
   customizations?: FlutterwaveCustomizations
+  /** Echoed back verbatim in the webhook payload — used to carry our own order id through. */
+  meta?: Record<string, unknown>
   callback: (response: FlutterwaveResponse) => void
   onclose: () => void
 }
@@ -64,6 +66,8 @@ export interface OpenFlutterwaveParams {
   name: string
   title: string
   description: string
+  /** Our order id — sent as `meta.order_id` so api/flutterwave-webhook.ts can match the charge back to it. */
+  orderId: string
 }
 
 /** Opens Flutterwave's real inline checkout modal. Resolves with the response on success, or null if the buyer closed it without paying. */
@@ -83,6 +87,7 @@ export async function openFlutterwaveCheckout(params: OpenFlutterwaveParams): Pr
       payment_options: 'card,mobilemoney,ussd,banktransfer',
       customer: { email: params.email, name: params.name },
       customizations: { title: params.title, description: params.description },
+      meta: { order_id: params.orderId },
       callback: (response) => {
         settled = true
         resolve(response)

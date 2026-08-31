@@ -13,6 +13,7 @@ export const CROPS: CropListing[] = [
     harvestDate: '2026-06-15',
     image: '🌽',
     certifications: ['GlobalGAP', 'Verified Exporter'],
+    complianceNote: 'Requires NCPB export permit for cross-border grain shipment.',
   },
   {
     id: 'crop-002',

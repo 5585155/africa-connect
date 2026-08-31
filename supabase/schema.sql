@@ -268,6 +268,11 @@ create policy "users manage their own watchlist"
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Realtime — stream inserts/updates to subscribed clients
+--
+-- MessagingContext subscribes to both `messages` and `conversations` (a new
+-- conversation needs to push too, not just its messages), and
+-- WatchlistContext subscribes to `watchlist` — all three must be in the
+-- publication or those subscriptions silently receive nothing.
 -- ─────────────────────────────────────────────────────────────────────────
 do $$
 begin
@@ -276,6 +281,13 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'crop_listings'
   ) then
     alter publication supabase_realtime add table public.crop_listings;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversations'
+  ) then
+    alter publication supabase_realtime add table public.conversations;
   end if;
 
   if not exists (
@@ -290,5 +302,12 @@ begin
     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'orders'
   ) then
     alter publication supabase_realtime add table public.orders;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'watchlist'
+  ) then
+    alter publication supabase_realtime add table public.watchlist;
   end if;
 end $$;

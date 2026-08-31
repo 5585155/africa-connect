@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { label: 'How It Works', to: '/how-it-works' },
   { label: 'Community', to: '/community' },
   { label: 'Support', to: '/support' },
+  { label: 'Invest', to: '/invest' },
 ]
 
 export default function Navbar() {

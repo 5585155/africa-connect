@@ -224,6 +224,7 @@ export default function Messages() {
 
       {showEscrowModal && activeOrder && (
         <EscrowPaymentModal
+          orderId={activeOrder.id}
           cropName={activeOrder.cropName}
           quantity={activeOrder.quantity}
           unitPriceUSD={activeOrder.unitPriceUSD}

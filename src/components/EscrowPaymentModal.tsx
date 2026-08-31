@@ -52,12 +52,14 @@ const PAYMENT_METHODS: {
 ]
 
 export default function EscrowPaymentModal({
+  orderId,
   cropName,
   quantity,
   unitPriceUSD,
   onConfirm,
   onClose,
 }: {
+  orderId: string
   cropName: string
   quantity: number
   unitPriceUSD: number
@@ -104,6 +106,7 @@ export default function EscrowPaymentModal({
             name: user?.name ?? 'Africa Connect Buyer',
             title: `Escrow — ${quantity} t ${cropName}`,
             description: 'Africa Connect protected escrow trade',
+            orderId,
           })
           if (!response || response.status !== 'successful') {
             setStatus('idle')
@@ -131,6 +134,8 @@ export default function EscrowPaymentModal({
         // No backend is available to create a PaymentIntent/Checkout Session,
         // so a real charge can't be confirmed from the client alone. The SDK
         // load above proves the key is valid; the charge itself is simulated.
+        // api/stripe-webhook.ts is ready to receive payment_intent.succeeded
+        // once a create-intent endpoint exists to set metadata.order_id.
       }
       await new Promise((resolve) => window.setTimeout(resolve, 1100))
       onConfirm({

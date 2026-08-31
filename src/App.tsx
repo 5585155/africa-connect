@@ -1,4 +1,5 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import InvestorHub from './components/InvestorHub'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import Auth from './pages/Auth'
@@ -23,6 +24,8 @@ function App() {
         <Route path="/support" element={<Support />} />
         <Route path="/auth" element={<Auth />} />
         <Route path="/messages" element={<Messages />} />
+        <Route path="/invest" element={<InvestorHub />} />
+        <Route path="/impact" element={<Navigate to="/invest" replace />} />
         <Route
           path="/farmer/dashboard"
           element={
