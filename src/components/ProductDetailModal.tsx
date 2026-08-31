@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useCurrency } from '../context/CurrencyContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
-import { CONVERTER_CURRENCIES, convertFromUSD, formatMoney, type ConverterCurrency } from '../lib/currency'
+import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
 import type { SellerListing } from '../types'
 
 export default function ProductDetailModal({
@@ -16,8 +17,9 @@ export default function ProductDetailModal({
   const { user } = useAuth()
   const { startThread } = useMessaging()
   const { createOrder } = useOrders()
+  const { currency: displayCurrency, convert } = useCurrency()
   const navigate = useNavigate()
-  const [currency, setCurrency] = useState<ConverterCurrency>('KES')
+  const [currency, setCurrency] = useState<ConverterCurrency>(displayCurrency)
   const [quantity, setQuantity] = useState(1)
   const soldOut = listing.status === 'Sold Out'
 
@@ -34,7 +36,7 @@ export default function ProductDetailModal({
   }, [onClose])
 
   const totalUSD = listing.unitPriceUSD * quantity
-  const converted = convertFromUSD(totalUSD, currency)
+  const converted = convert(totalUSD, 'USD', currency)
 
   async function handleContactFarmer() {
     if (!user) {

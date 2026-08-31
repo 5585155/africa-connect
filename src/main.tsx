@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.tsx'
 import { AuthProvider } from './context/AuthContext'
 import { CropProvider } from './context/CropContext'
+import { CurrencyProvider } from './context/CurrencyContext'
 import { MessagingProvider } from './context/MessagingContext'
 import { OrdersProvider } from './context/OrdersContext'
 import { WatchlistProvider } from './context/WatchlistContext'
@@ -13,15 +14,17 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <CropProvider>
-          <WatchlistProvider>
-            <MessagingProvider>
-              <OrdersProvider>
-                <App />
-              </OrdersProvider>
-            </MessagingProvider>
-          </WatchlistProvider>
-        </CropProvider>
+        <CurrencyProvider>
+          <CropProvider>
+            <WatchlistProvider>
+              <MessagingProvider>
+                <OrdersProvider>
+                  <App />
+                </OrdersProvider>
+              </MessagingProvider>
+            </WatchlistProvider>
+          </CropProvider>
+        </CurrencyProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

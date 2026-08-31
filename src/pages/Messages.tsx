@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import EscrowPaymentModal, { computeEscrowBreakdown } from '../components/EscrowPaymentModal'
+import EscrowPaymentModal, { computeEscrowBreakdown, type EscrowPaymentResult } from '../components/EscrowPaymentModal'
 import OrderStatusTracker from '../components/OrderStatusTracker'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
@@ -47,13 +47,17 @@ export default function Messages() {
     setShowOfferInput(false)
   }
 
-  function handleConfirmEscrow() {
+  function handleConfirmEscrow(result: EscrowPaymentResult) {
     if (!activeThread || !activeOrder) return
     const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, activeOrder.unitPriceUSD)
-    fundEscrow(activeOrder.id, { logisticsUSD, escrowFeeUSD, totalUSD })
+    fundEscrow(activeOrder.id, { logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
+
+    const gateway = result.method === 'flutterwave' ? 'Flutterwave' : 'Stripe'
     sendMessage(
       activeThread.id,
-      `Funded escrow trade for ${activeOrder.quantity} t ${activeOrder.cropName} — total $${totalUSD.toLocaleString()} held in protected escrow.`,
+      `Funded escrow trade for ${activeOrder.quantity} t ${activeOrder.cropName} via ${gateway}${
+        result.sandbox ? ' (sandbox)' : ''
+      } — total $${totalUSD.toLocaleString()} held in protected escrow. Receipt: ${result.reference}`,
       'escrow',
     )
     setShowEscrowModal(false)

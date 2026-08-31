@@ -1,15 +1,6 @@
-export type Currency = 'USD' | 'EUR' | 'KES' | 'NGN'
-
 export type Language = 'en' | 'fr' | 'sw' | 'pcm'
 
 export type Role = 'farmer' | 'buyer'
-
-export const CURRENCIES: { code: Currency; label: string }[] = [
-  { code: 'USD', label: 'USD — US Dollar' },
-  { code: 'EUR', label: 'EUR — Euro' },
-  { code: 'KES', label: 'KES — Kenyan Shilling' },
-  { code: 'NGN', label: 'NGN — Nigerian Naira' },
-]
 
 export const LANGUAGES: { code: Language; label: string }[] = [
   { code: 'en', label: 'English' },
@@ -87,5 +78,7 @@ export interface Order {
   escrowFeeUSD: number
   totalUSD: number
   status: OrderStatus
+  /** Payment gateway reference generated when escrow is funded (e.g. a Flutterwave tx_ref or simulated sandbox id). */
+  receiptReference?: string
   createdAt: number
 }

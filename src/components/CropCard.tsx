@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useCurrency } from '../context/CurrencyContext'
 import { useWatchlist } from '../context/WatchlistContext'
+import { formatMoney } from '../lib/currency'
 import type { SellerListing } from '../types'
 import ProductDetailModal from './ProductDetailModal'
 
@@ -11,6 +13,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function CropCard({ listing }: { listing: SellerListing }) {
   const [open, setOpen] = useState(false)
   const { isSaved, toggleSaved } = useWatchlist()
+  const { currency, convert } = useCurrency()
   const saved = isSaved(listing.id)
   const soldOut = listing.status === 'Sold Out'
 
@@ -102,7 +105,14 @@ export default function CropCard({ listing }: { listing: SellerListing }) {
           </div>
           <div>
             <dt className="text-earth-700/70">Price / ton</dt>
-            <dd className="font-semibold text-earth-950">${listing.unitPriceUSD.toLocaleString()}</dd>
+            <dd className="font-semibold text-earth-950">
+              ${listing.unitPriceUSD.toLocaleString()}
+              {currency !== 'USD' && (
+                <span className="ml-1 font-normal text-earth-700/70">
+                  ≈ {formatMoney(convert(listing.unitPriceUSD, 'USD', currency), currency)}
+                </span>
+              )}
+            </dd>
           </div>
           <div>
             <dt className="text-earth-700/70">Farmer</dt>

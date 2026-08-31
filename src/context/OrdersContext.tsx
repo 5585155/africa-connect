@@ -21,6 +21,7 @@ interface EscrowBreakdown {
   logisticsUSD: number
   escrowFeeUSD: number
   totalUSD: number
+  receiptReference: string
 }
 
 interface OrdersContextValue {
@@ -84,6 +85,7 @@ function LocalOrdersProvider({ children }: { children: ReactNode }) {
                 logisticsUSD: breakdown.logisticsUSD,
                 escrowFeeUSD: breakdown.escrowFeeUSD,
                 totalUSD: breakdown.totalUSD,
+                receiptReference: breakdown.receiptReference,
               }
             : o,
         ),
@@ -186,6 +188,7 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
         logistics_usd: breakdown.logisticsUSD,
         escrow_fee_usd: breakdown.escrowFeeUSD,
         total_amount: breakdown.totalUSD,
+        receipt_reference: breakdown.receiptReference,
       })
       .eq('id', orderId)
       .then(({ error }) => error && console.error('[OrdersContext] fundEscrow failed', error))

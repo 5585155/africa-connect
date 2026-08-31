@@ -115,9 +115,14 @@ create table if not exists public.orders (
   total_amount numeric not null default 0,
   escrow_status text not null default 'Inquiry Sent'
     check (escrow_status in ('Inquiry Sent', 'Escrow Funded', 'Logistics Scheduled', 'Delivered & Released')),
+  -- Payment gateway reference (Flutterwave tx_ref, or a simulated sandbox id) set when escrow is funded.
+  receipt_reference text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Upgrades an orders table created before receipt_reference existed.
+alter table public.orders add column if not exists receipt_reference text;
 
 create index if not exists orders_buyer_id_idx on public.orders (buyer_id);
 create index if not exists orders_farmer_id_idx on public.orders (farmer_id);

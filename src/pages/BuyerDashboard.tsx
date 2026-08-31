@@ -115,6 +115,9 @@ export default function BuyerDashboard() {
                   <span className="text-sm font-semibold text-earth-950">${order.totalUSD.toLocaleString()}</span>
                 </div>
                 <OrderStatusTracker status={order.status} />
+                {order.receiptReference && (
+                  <p className="mt-3 text-xs text-earth-700/70">Receipt: {order.receiptReference}</p>
+                )}
               </div>
             ))}
           </div>

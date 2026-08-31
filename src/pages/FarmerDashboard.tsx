@@ -413,6 +413,9 @@ export default function FarmerDashboard() {
                 <div className="mt-4">
                   <OrderStatusTracker status={order.status} />
                 </div>
+                {order.receiptReference && (
+                  <p className="mt-3 text-xs text-earth-700/70">Receipt: {order.receiptReference}</p>
+                )}
               </div>
             )
           })}

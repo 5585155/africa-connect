@@ -71,6 +71,7 @@ export interface OrderRow {
   escrow_fee_usd: number
   total_amount: number
   escrow_status: string
+  receipt_reference: string | null
   created_at: string
   crop_listings?: { crop_name: string } | null
   buyer?: { full_name: string } | null
@@ -93,6 +94,7 @@ export function rowToOrder(row: OrderRow): Order {
     escrowFeeUSD: Number(row.escrow_fee_usd),
     totalUSD: Number(row.total_amount),
     status: row.escrow_status as OrderStatus,
+    receiptReference: row.receipt_reference ?? undefined,
     createdAt: new Date(row.created_at).getTime(),
   }
 }

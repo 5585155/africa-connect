@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Currency, Language } from '../types'
-import { CURRENCIES, LANGUAGES } from '../types'
+import { useCurrency } from '../context/CurrencyContext'
+import { CONVERTER_CURRENCIES, type ConverterCurrency } from '../lib/currency'
+import type { Language } from '../types'
+import { LANGUAGES } from '../types'
 import UserMenu from './UserMenu'
 
 const NAV_LINKS = [
@@ -14,7 +16,7 @@ const NAV_LINKS = [
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [regionOpen, setRegionOpen] = useState(false)
-  const [currency, setCurrency] = useState<Currency>('USD')
+  const { currency, setCurrency, source: rateSource } = useCurrency()
   const [language, setLanguage] = useState<Language>('en')
 
   return (
@@ -46,6 +48,7 @@ export default function Navbar() {
             setOpen={setRegionOpen}
             currency={currency}
             setCurrency={setCurrency}
+            rateSource={rateSource}
             language={language}
             setLanguage={setLanguage}
           />
@@ -93,6 +96,7 @@ export default function Navbar() {
               setOpen={setRegionOpen}
               currency={currency}
               setCurrency={setCurrency}
+              rateSource={rateSource}
               language={language}
               setLanguage={setLanguage}
               fullWidth
@@ -109,14 +113,16 @@ function RegionDropdown({
   setOpen,
   currency,
   setCurrency,
+  rateSource,
   language,
   setLanguage,
   fullWidth = false,
 }: {
   open: boolean
   setOpen: (open: boolean) => void
-  currency: Currency
-  setCurrency: (currency: Currency) => void
+  currency: ConverterCurrency
+  setCurrency: (currency: ConverterCurrency) => void
+  rateSource: 'live' | 'fallback'
   language: Language
   setLanguage: (language: Language) => void
   fullWidth?: boolean
@@ -143,9 +149,20 @@ function RegionDropdown({
       {open && (
         <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-earth-200 bg-white p-3 text-earth-950 shadow-lg">
           <div className="mb-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-earth-700">Currency</p>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-earth-700">Currency</p>
+              <span
+                className={`flex items-center gap-1 text-[10px] font-medium ${
+                  rateSource === 'live' ? 'text-earth-600' : 'text-clay-600'
+                }`}
+                title={rateSource === 'live' ? 'Live exchange rates' : 'Offline — using static rates'}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${rateSource === 'live' ? 'bg-earth-600' : 'bg-clay-600'}`} />
+                {rateSource === 'live' ? 'Live rates' : 'Static rates'}
+              </span>
+            </div>
             <div className="grid grid-cols-2 gap-1">
-              {CURRENCIES.map((c) => (
+              {CONVERTER_CURRENCIES.map((c) => (
                 <button
                   key={c.code}
                   type="button"
