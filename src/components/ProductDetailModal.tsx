@@ -5,6 +5,7 @@ import { useCurrency } from '../context/CurrencyContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
 import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
+import { formatHarvestDate } from '../lib/dates'
 import { isSupabaseConfigured } from '../lib/supabase'
 import type { SellerListing } from '../types'
 import ChartFallback from './ChartFallback'
@@ -179,11 +180,7 @@ export default function ProductDetailModal({
             <div>
               <dt className="text-xs font-medium uppercase tracking-wide text-earth-700/70">Harvest date</dt>
               <dd className="mt-0.5 font-semibold text-earth-950">
-                {new Date(listing.harvestDate).toLocaleDateString(undefined, {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                })}
+                {formatHarvestDate(listing.harvestDate)}
               </dd>
             </div>
           </dl>

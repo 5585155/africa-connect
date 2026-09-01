@@ -16,6 +16,23 @@ export function isSchemaMismatchError(error: { code?: string } | null | undefine
   return ['42703', 'PGRST200', 'PGRST201', 'PGRST204'].includes(error.code)
 }
 
+/**
+ * Normalizes a live `crop_listings.status` value into the app's canonical
+ * `ListingStatus`. Seeded/imported rows aren't guaranteed to use the app's
+ * exact casing/wording (e.g. `'active'` instead of `'Available'`) — match
+ * common variants case-insensitively, and default anything unrecognized (or
+ * missing) to `'Available'` rather than let an unknown string leak into the
+ * UI and silently disable actions that check `status === 'Sold Out'`.
+ */
+function normalizeListingStatus(raw: string | null | undefined): ListingStatus {
+  const value = (raw ?? '').trim().toLowerCase()
+  if (['sold out', 'sold_out', 'soldout', 'sold-out', 'unavailable'].includes(value)) return 'Sold Out'
+  if (['in transit', 'in_transit', 'intransit', 'in-transit', 'shipping', 'pending'].includes(value)) {
+    return 'In Transit'
+  }
+  return 'Available'
+}
+
 /** Shape of a `crop_listings` row, optionally joined with the owning farmer's profile. */
 export interface CropListingRow {
   id: string
@@ -51,7 +68,7 @@ export function rowToListing(row: CropListingRow): SellerListing {
     certifications: row.certifications ?? [],
     complianceNote: row.compliance_note ?? undefined,
     exportMonopoly: row.export_monopoly,
-    status: row.status as ListingStatus,
+    status: normalizeListingStatus(row.status),
   }
 }
 

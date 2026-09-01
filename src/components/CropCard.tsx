@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useCurrency } from '../context/CurrencyContext'
 import { useWatchlist } from '../context/WatchlistContext'
 import { formatMoney } from '../lib/currency'
+import { formatHarvestDate } from '../lib/dates'
 import type { SellerListing } from '../types'
 import ProductDetailModal from './ProductDetailModal'
 
@@ -121,7 +122,7 @@ export default function CropCard({ listing }: { listing: SellerListing }) {
           <div>
             <dt className="text-earth-700/70">Harvested</dt>
             <dd className="font-semibold text-earth-950">
-              {new Date(listing.harvestDate).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+              {formatHarvestDate(listing.harvestDate, { month: 'short', year: 'numeric' })}
             </dd>
           </div>
         </dl>
