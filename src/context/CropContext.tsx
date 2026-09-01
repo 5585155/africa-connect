@@ -53,6 +53,8 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
         .select('*, profiles(full_name)')
         .order('created_at', { ascending: false })
 
+      console.log('[Marketplace] Query result:', { data, error })
+
       if (!cancelled) {
         if (error) console.error('[CropContext] failed to load listings', error)
         setListings((data as unknown as CropListingRow[] | null)?.map(rowToListing) ?? [])

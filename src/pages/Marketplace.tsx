@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import CategoryTabs from '../components/CategoryTabs'
 import CropCard from '../components/CropCard'
 import MarketAnalyticsBanner from '../components/MarketAnalyticsBanner'
@@ -16,6 +16,15 @@ export default function Marketplace() {
   const [location, setLocation] = useState('')
   const [category, setCategory] = useState('All')
   const [priceRange, setPriceRange] = useState({ min: 0, max: MAX_PRICE })
+  // Listings load asynchronously from Supabase, so MAX_PRICE is 0 on the very
+  // first render — without this, `priceRange.max` (set once, from useState's
+  // initial value) would stay frozen at 0 forever once real data arrives,
+  // silently filtering out every listing. Keep tracking the live max until
+  // the buyer actually drags the slider themselves.
+  const [priceTouched, setPriceTouched] = useState(false)
+  useEffect(() => {
+    if (!priceTouched) setPriceRange({ min: 0, max: MAX_PRICE })
+  }, [MAX_PRICE, priceTouched])
   const [minQuantity, setMinQuantity] = useState(0)
   const [verifiedOnly, setVerifiedOnly] = useState(false)
 
@@ -38,6 +47,7 @@ export default function Marketplace() {
     setLocation('')
     setCategory('All')
     setPriceRange({ min: 0, max: MAX_PRICE })
+    setPriceTouched(false)
     setMinQuantity(0)
     setVerifiedOnly(false)
   }
@@ -116,7 +126,10 @@ export default function Marketplace() {
                 max={MAX_PRICE}
                 valueMin={priceRange.min}
                 valueMax={priceRange.max}
-                onChange={setPriceRange}
+                onChange={(range) => {
+                  setPriceTouched(true)
+                  setPriceRange(range)
+                }}
               />
             </div>
 
