@@ -1,4 +1,4 @@
-import type { CropCategory, ListingStatus, Order, OrderStatus, SellerListing } from '../types'
+import type { CropCategory, ListingStatus, Order, OrderStatus, Role, SellerListing } from '../types'
 
 /**
  * True for PostgREST errors caused by a query referencing a column or
@@ -31,6 +31,19 @@ function normalizeListingStatus(raw: string | null | undefined): ListingStatus {
     return 'In Transit'
   }
   return 'Available'
+}
+
+/**
+ * Normalizes a live `profiles.role` value into the app's canonical
+ * lowercase `Role`. Confirmed on this project's live database: the check
+ * constraint actually requires capitalized values (`'Farmer'`/`'Buyer'`,
+ * plus `'Logistics'`/`'Admin'` this app doesn't use) — the opposite of what
+ * `supabase/schema.sql` and every other write path assume. Matching
+ * case-insensitively here means the app behaves the same regardless of
+ * which casing a given project's constraint ends up using.
+ */
+export function normalizeRole(raw: string | null | undefined): Role {
+  return (raw ?? '').trim().toLowerCase() === 'farmer' ? 'farmer' : 'buyer'
 }
 
 /** Shape of a `crop_listings` row, optionally joined with the owning farmer's profile. */

@@ -102,9 +102,13 @@ export default function Auth() {
               </button>
             ))}
           </div>
-          {mode === 'signin' && (
+          {mode === 'signin' ? (
             <p className="mt-1.5 text-xs text-earth-700/60">
               Only used as a fallback when no backend is connected — a real account's role comes from your profile.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-earth-700/60">
+              This is your starting workspace — you can switch to the other one anytime from your account menu.
             </p>
           )}
         </div>
@@ -171,7 +175,7 @@ export default function Auth() {
 
         <p className="text-center text-xs text-earth-700/70">
           {mode === 'signin'
-            ? "Signing in doesn't change your account role — it's set when you sign up."
+            ? 'Signing in loads whichever workspace your account last used — switch anytime from the account menu.'
             : 'Your account is created for real when a Supabase project is connected; otherwise this is a local demo session.'}
         </p>
       </form>

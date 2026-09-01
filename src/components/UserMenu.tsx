@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import type { Role } from '../types'
 
 function initials(name: string) {
   return name
@@ -12,9 +13,11 @@ function initials(name: string) {
 }
 
 export default function UserMenu({ fullWidth = false }: { fullWidth?: boolean }) {
-  const { user, logout } = useAuth()
+  const { user, switchRole, logout } = useAuth()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState<string | null>(null)
 
   if (!user) {
     return (
@@ -30,11 +33,25 @@ export default function UserMenu({ fullWidth = false }: { fullWidth?: boolean })
   }
 
   const dashboardPath = user.role === 'farmer' ? '/farmer/dashboard' : '/buyer/dashboard'
+  const otherRole: Role = user.role === 'farmer' ? 'buyer' : 'farmer'
 
   function handleLogout() {
     logout()
     setOpen(false)
     navigate('/')
+  }
+
+  async function handleSwitchRole() {
+    setSwitching(true)
+    setSwitchError(null)
+    const result = await switchRole(otherRole)
+    setSwitching(false)
+    if (result.error) {
+      setSwitchError(result.error)
+      return
+    }
+    setOpen(false)
+    navigate(otherRole === 'farmer' ? '/farmer/dashboard' : '/buyer/dashboard')
   }
 
   return (
@@ -74,7 +91,7 @@ export default function UserMenu({ fullWidth = false }: { fullWidth?: boolean })
 
         {open && (
           <div
-            className={`absolute right-0 z-10 mt-2 w-48 rounded-lg border border-earth-200 bg-white p-1.5 text-earth-950 shadow-lg ${
+            className={`absolute right-0 z-10 mt-2 w-56 rounded-lg border border-earth-200 bg-white p-1.5 text-earth-950 shadow-lg ${
               fullWidth ? 'w-full' : ''
             }`}
           >
@@ -92,6 +109,22 @@ export default function UserMenu({ fullWidth = false }: { fullWidth?: boolean })
             >
               Messages
             </Link>
+
+            <div className="my-1.5 border-t border-sand-200" />
+
+            <button
+              type="button"
+              onClick={handleSwitchRole}
+              disabled={switching}
+              className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm hover:bg-sand-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span>Switch to {otherRole} workspace</span>
+              <span aria-hidden className="text-earth-700/50">⇄</span>
+            </button>
+            {switchError && <p className="px-3 pb-1 text-xs text-clay-600">{switchError}</p>}
+
+            <div className="my-1.5 border-t border-sand-200" />
+
             <button
               type="button"
               onClick={handleLogout}

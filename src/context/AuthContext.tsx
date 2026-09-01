@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { isSupabaseConfigured, supabase, supabaseUrl } from '../lib/supabase'
+import { normalizeRole } from '../lib/supabaseMappers'
 import type { AuthUser, Role } from '../types'
 
 /**
@@ -61,6 +62,14 @@ interface AuthContextValue {
   loading: boolean
   signUp: (params: SignUpParams) => Promise<AuthResult>
   signIn: (params: SignInParams) => Promise<AuthResult>
+  /**
+   * Switches the signed-in account's workspace between farmer and buyer.
+   * This is a relabel, not a new account — a farmer's listings stay tied to
+   * their id via `farmer_id` regardless of the account's current `role`
+   * label, so nothing is lost switching back and forth (see ProtectedRoute,
+   * which uses `role` purely as a navigation gate, not a data filter).
+   */
+  switchRole: (role: Role) => Promise<{ error?: string }>
   logout: () => void
 }
 
@@ -81,6 +90,10 @@ function LocalAuthProvider({ children }: { children: ReactNode }) {
       signIn: async ({ email, role = 'buyer' }) => {
         setUser((prev) => ({ name: prev?.name || email.split('@')[0] || 'there', email, role }))
         return { role }
+      },
+      switchRole: async (role) => {
+        setUser((prev) => (prev ? { ...prev, role } : prev))
+        return {}
       },
       logout: () => setUser(null),
     }),
@@ -112,11 +125,44 @@ async function fetchProfile(userId: string, email: string): Promise<AuthUser> {
       })
       return { id: userId, name: email.split('@')[0] ?? 'there', email, role: 'buyer' }
     }
-    return { id: userId, name: data.full_name, email, role: data.role as Role }
+    return { id: userId, name: data.full_name, email, role: normalizeRole(data.role) }
   } catch (error) {
     console.error('[AuthContext] profile lookup threw — falling back to a generic buyer profile', error)
     return { id: userId, name: email.split('@')[0] ?? 'there', email, role: 'buyer' }
   }
+}
+
+/** Postgres "check_violation" — the signal that a write's `role` value doesn't match this project's live constraint casing. */
+const CHECK_VIOLATION = '23514'
+
+function capitalizeRole(role: Role): string {
+  return role.charAt(0).toUpperCase() + role.slice(1)
+}
+
+/**
+ * Updates `profiles.role` for the workspace switcher — tries the app's
+ * canonical lowercase value first (matching supabase/schema.sql), and
+ * retries capitalized on a check-constraint violation, so switching works
+ * regardless of which casing this particular project's live constraint
+ * actually enforces.
+ */
+async function updateProfileRole(userId: string, role: Role): Promise<{ error?: string }> {
+  let { error } = await supabase!.from('profiles').update({ role }).eq('id', userId)
+
+  if (error?.code === CHECK_VIOLATION) {
+    ;({ error } = await supabase!.from('profiles').update({ role: capitalizeRole(role) }).eq('id', userId))
+  }
+
+  if (error) {
+    console.error('[AuthContext] switchRole failed', {
+      code: error.code,
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+    })
+    return { error: error.message }
+  }
+  return {}
 }
 
 /**
@@ -145,30 +191,40 @@ async function ensureProfile(userId: string, email: string, name: string, role: 
   }
 
   if (existing) {
-    return { id: userId, name: existing.full_name, email, role: existing.role as Role }
+    return { id: userId, name: existing.full_name, email, role: normalizeRole(existing.role) }
   }
 
   console.warn('[AuthContext] no profile row found after signUp — the trigger may have failed; self-healing with a client-side upsert')
   const fallbackName = name.trim() || email.split('@')[0] || 'there'
 
   try {
-    const { data: upserted, error: upsertError } = await supabase!
+    let { data: upserted, error: upsertError } = await supabase!
       .from('profiles')
       .upsert({ id: userId, email, full_name: fallbackName, role }, { onConflict: 'id' })
       .select('full_name, role')
       .single()
 
-    if (upsertError) {
+    if (upsertError?.code === CHECK_VIOLATION) {
+      // This project's live check constraint wants the other casing (see
+      // normalizeRole's doc comment) — retry once before giving up.
+      ;({ data: upserted, error: upsertError } = await supabase!
+        .from('profiles')
+        .upsert({ id: userId, email, full_name: fallbackName, role: capitalizeRole(role) }, { onConflict: 'id' })
+        .select('full_name, role')
+        .single())
+    }
+
+    if (upsertError || !upserted) {
       console.error('[AuthContext] fallback profile upsert failed', {
-        code: upsertError.code,
-        message: upsertError.message,
-        details: upsertError.details,
-        hint: upsertError.hint,
+        code: upsertError?.code,
+        message: upsertError?.message,
+        details: upsertError?.details,
+        hint: upsertError?.hint,
       })
       return { id: userId, name: fallbackName, email, role }
     }
 
-    return { id: userId, name: upserted.full_name, email, role: upserted.role as Role }
+    return { id: userId, name: upserted.full_name, email, role: normalizeRole(upserted.role) }
   } catch (error) {
     console.error('[AuthContext] fallback profile upsert threw', error)
     return { id: userId, name: fallbackName, email, role }
@@ -249,6 +305,12 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         const profile = await fetchProfile(data.user.id, email)
         setUser(profile)
         return { role: profile.role }
+      },
+      switchRole: async (role) => {
+        if (!user?.id) return { error: 'You need to be signed in to switch workspaces.' }
+        const result = await updateProfileRole(user.id, role)
+        if (!result.error) setUser((prev) => (prev ? { ...prev, role } : prev))
+        return result
       },
       logout: () => {
         supabase!.auth.signOut()
