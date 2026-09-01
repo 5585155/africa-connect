@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { isSchemaMismatchError } from '../lib/supabaseMappers'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 
@@ -149,13 +150,24 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const { data: conversations, error: convError } = await supabase!
+    let { data: conversations, error: convError } = await supabase!
       .from('conversations')
       .select(
         '*, crop_listings(crop_name), buyer:profiles!conversations_buyer_id_fkey(full_name), farmer:profiles!conversations_farmer_id_fkey(full_name)',
       )
       .or(`buyer_id.eq.${user.id},farmer_id.eq.${user.id}`)
       .order('created_at', { ascending: false })
+
+    if (convError && isSchemaMismatchError(convError)) {
+      // The embedded joins or the created_at order-by don't match this
+      // project's live schema — fall back to a plain select so conversations
+      // still load, just without the joined crop/farmer/buyer names.
+      console.warn('[MessagingContext] rich conversations query failed, retrying with a simplified query', convError)
+      ;({ data: conversations, error: convError } = await supabase!
+        .from('conversations')
+        .select('*')
+        .or(`buyer_id.eq.${user.id},farmer_id.eq.${user.id}`))
+    }
 
     if (convError) {
       console.error('[MessagingContext] failed to load conversations', convError)
@@ -164,18 +176,27 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
     }
 
     const ids = (conversations ?? []).map((c) => c.id)
-    const { data: messages, error: msgError } = ids.length
+    let { data: messages, error: msgError } = ids.length
       ? await supabase!.from('messages').select('*').in('conversation_id', ids).order('created_at', { ascending: true })
       : { data: [], error: null }
 
+    if (msgError && isSchemaMismatchError(msgError)) {
+      console.warn('[MessagingContext] messages order-by failed, retrying without ordering', msgError)
+      ;({ data: messages, error: msgError } = await supabase!.from('messages').select('*').in('conversation_id', ids))
+    }
+
     if (msgError) console.error('[MessagingContext] failed to load messages', msgError)
+
+    const sortedMessages = (messages ?? [])
+      .slice()
+      .sort((a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime())
 
     const nextThreads: Thread[] = (conversations ?? []).map((c) => ({
       id: c.id,
       listingId: c.crop_id,
       cropName: c.crop_listings?.crop_name ?? 'Listing',
       counterpartName: (user.id === c.buyer_id ? c.farmer?.full_name : c.buyer?.full_name) ?? 'Trade partner',
-      messages: (messages ?? [])
+      messages: sortedMessages
         .filter((m) => m.conversation_id === c.id)
         .map((m) => ({
           id: m.id,
@@ -207,7 +228,16 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
 
   const startThread = useCallback(
     async ({ listingId, counterpartId, initialMessage }: StartThreadParams) => {
-      if (!user?.id || !counterpartId) return ''
+      if (!user?.id) throw new Error('You need to be signed in to contact a farmer.')
+      if (!counterpartId) {
+        // `conversations.farmer_id` is NOT NULL in the schema, so this can never
+        // succeed as a real conversation — surface it instead of silently
+        // no-op'ing (the previous behavior made "Contact Farmer" look broken:
+        // the click registered but nothing happened, with zero feedback).
+        throw new Error(
+          "This listing isn't linked to a farmer account yet, so it can't be contacted directly. Try a listing added by a signed-up farmer instead.",
+        )
+      }
 
       const existing = threads.find((t) => t.listingId === listingId)
       if (existing) return existing.id
@@ -220,7 +250,7 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
 
       if (error || !conversation) {
         console.error('[MessagingContext] failed to start conversation', error)
-        return ''
+        throw new Error(error?.message || 'Could not start this conversation. Please try again.')
       }
 
       await supabase!.from('messages').insert({

@@ -5,6 +5,7 @@ import { useCurrency } from '../context/CurrencyContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
 import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
+import { isSupabaseConfigured } from '../lib/supabase'
 import type { SellerListing } from '../types'
 import ChartFallback from './ChartFallback'
 
@@ -24,7 +25,15 @@ export default function ProductDetailModal({
   const navigate = useNavigate()
   const [currency, setCurrency] = useState<ConverterCurrency>(displayCurrency)
   const [quantity, setQuantity] = useState(1)
+  const [contactError, setContactError] = useState<string | null>(null)
+  const [contacting, setContacting] = useState(false)
   const soldOut = listing.status === 'Sold Out'
+  // `conversations.farmer_id` / `orders.farmer_id` are NOT NULL in Supabase — a
+  // listing with no linked farmer account (e.g. demo/seed catalog data) can
+  // never actually be contacted there, so disable it up front instead of
+  // letting the click silently do nothing.
+  const missingFarmerLink = isSupabaseConfigured && !listing.farmerId
+  const contactDisabled = soldOut || missingFarmerLink || contacting
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -42,37 +51,61 @@ export default function ProductDetailModal({
   const converted = convert(totalUSD, 'USD', currency)
 
   async function handleContactFarmer() {
+    console.log('[ProductDetailModal] Contact Farmer clicked', {
+      listingId: listing.id,
+      farmerId: listing.farmerId,
+      userId: user?.id ?? null,
+      contactDisabled,
+    })
+
     if (!user) {
-      onClose()
-      navigate('/auth')
+      // Give a visible reason before leaving — an instant, silent redirect
+      // reads as "the button did nothing" (which is exactly the bug report
+      // this was written to fix): show why, then hand off to /auth.
+      setContactError('Please sign in to contact this farmer — redirecting you to sign in…')
+      window.setTimeout(() => {
+        onClose()
+        navigate('/auth')
+      }, 900)
       return
     }
 
-    const threadId = await startThread({
-      listingId: listing.id,
-      cropName: listing.cropName,
-      counterpartName: listing.farmerName,
-      counterpartId: listing.farmerId,
-      initialMessage: `Hi ${listing.farmerName}, I'm interested in your ${listing.cropName} — is ${quantity} ton${
-        quantity === 1 ? '' : 's'
-      } still available at $${listing.unitPriceUSD.toLocaleString()}/ton?`,
-    })
+    setContactError(null)
+    setContacting(true)
 
-    if (!threadId) return
+    try {
+      const threadId = await startThread({
+        listingId: listing.id,
+        cropName: listing.cropName,
+        counterpartName: listing.farmerName,
+        counterpartId: listing.farmerId,
+        initialMessage: `Hi ${listing.farmerName}, I'm interested in your ${listing.cropName} — is ${quantity} ton${
+          quantity === 1 ? '' : 's'
+        } still available at $${listing.unitPriceUSD.toLocaleString()}/ton?`,
+      })
 
-    createOrder({
-      threadId,
-      listingId: listing.id,
-      cropName: listing.cropName,
-      farmerName: listing.farmerName,
-      farmerId: listing.farmerId,
-      buyerName: user.name,
-      quantity,
-      unitPriceUSD: listing.unitPriceUSD,
-    })
+      if (!threadId) {
+        throw new Error('Could not start this conversation. Please try again.')
+      }
 
-    onClose()
-    navigate(`/messages?thread=${threadId}`)
+      createOrder({
+        threadId,
+        listingId: listing.id,
+        cropName: listing.cropName,
+        farmerName: listing.farmerName,
+        farmerId: listing.farmerId,
+        buyerName: user.name,
+        quantity,
+        unitPriceUSD: listing.unitPriceUSD,
+      })
+
+      onClose()
+      navigate(`/messages?thread=${threadId}`)
+    } catch (error) {
+      console.error('[ProductDetailModal] handleContactFarmer failed', error)
+      setContactError(error instanceof Error ? error.message : 'Something went wrong. Please try again.')
+      setContacting(false)
+    }
   }
 
   return (
@@ -249,14 +282,31 @@ export default function ProductDetailModal({
             </p>
           </div>
 
+          {contactError && (
+            <p role="alert" className="mt-4 rounded-lg bg-clay-600/10 px-3 py-2 text-sm text-clay-700">
+              {contactError}
+            </p>
+          )}
+
           <button
             type="button"
-            disabled={soldOut}
+            disabled={contactDisabled}
             onClick={handleContactFarmer}
-            className="mt-6 w-full rounded-xl bg-earth-800 py-3 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-earth-700/60"
+            className="mt-4 w-full rounded-xl bg-earth-800 py-3 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-earth-700/60"
           >
-            {soldOut ? 'Sold Out' : 'Contact Farmer'}
+            {soldOut
+              ? 'Sold Out'
+              : contacting
+                ? 'Starting conversation…'
+                : missingFarmerLink
+                  ? 'Not Linked to a Farmer Account'
+                  : 'Contact Farmer'}
           </button>
+          {missingFarmerLink && (
+            <p className="mt-1.5 text-xs text-earth-700/60">
+              This listing isn't linked to a farmer account yet, so it can't be contacted directly.
+            </p>
+          )}
         </div>
       </div>
     </div>

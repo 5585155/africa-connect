@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
-import { rowToOrder, type OrderRow } from '../lib/supabaseMappers'
+import { isSchemaMismatchError, rowToOrder, type OrderRow } from '../lib/supabaseMappers'
 import { ORDER_STAGES, type Order } from '../types'
 import { useAuth } from './AuthContext'
 
@@ -134,14 +134,28 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const { data, error } = await supabase!
+    let { data, error } = await supabase!
       .from('orders')
       .select(ORDER_SELECT)
       .or(`buyer_id.eq.${user.id},farmer_id.eq.${user.id}`)
       .order('created_at', { ascending: false })
 
+    if (error && isSchemaMismatchError(error)) {
+      // The embedded joins (buyer/farmer/crop names) or the created_at
+      // order-by don't match this project's live schema — fall back to a
+      // plain select so orders still load, just without the joined display
+      // names (rowToOrder already tolerates those fields being absent).
+      console.warn('[OrdersContext] rich orders query failed, retrying with a simplified query', error)
+      ;({ data, error } = await supabase!
+        .from('orders')
+        .select('*')
+        .or(`buyer_id.eq.${user.id},farmer_id.eq.${user.id}`))
+    }
+
     if (error) console.error('[OrdersContext] failed to load orders', error)
-    setOrders((data as unknown as OrderRow[] | null)?.map(rowToOrder) ?? [])
+    const rows = ((data as unknown as OrderRow[] | null) ?? []).slice()
+    rows.sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
+    setOrders(rows.map(rowToOrder))
     setLoading(false)
   }, [user])
 
@@ -161,7 +175,14 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
 
   const createOrder = useCallback(
     (params: CreateOrderParams) => {
-      if (!user?.id || !params.farmerId) return ''
+      if (!user?.id) throw new Error('You need to be signed in to start an order.')
+      if (!params.farmerId) {
+        // `orders.farmer_id` is NOT NULL in the schema — mirrors the same guard
+        // in MessagingContext.startThread, which normally throws before this
+        // is ever reached. Kept here too in case createOrder is ever called
+        // on its own.
+        throw new Error("This listing isn't linked to a farmer account yet, so an order can't be created for it.")
+      }
       supabase!
         .from('orders')
         .insert({

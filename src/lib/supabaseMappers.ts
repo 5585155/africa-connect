@@ -1,5 +1,21 @@
 import type { CropCategory, ListingStatus, Order, OrderStatus, SellerListing } from '../types'
 
+/**
+ * True for PostgREST errors caused by a query referencing a column or
+ * embedded relationship that doesn't exist on the live database — e.g. an
+ * `.order('created_at', ...)` against a table whose live schema has drifted
+ * from `supabase/schema.sql` and never got that column, or a `!fk_name`
+ * embed alias that doesn't match the live foreign key's actual name.
+ * Callers use this to retry with a plain, unordered `select('*')` instead of
+ * leaving a whole context permanently empty over one missing column.
+ */
+export function isSchemaMismatchError(error: { code?: string } | null | undefined): boolean {
+  if (!error?.code) return false
+  // 42703 = Postgres "undefined_column"; PGRST200/201/204 = PostgREST couldn't
+  // resolve an embedded relationship or requested column.
+  return ['42703', 'PGRST200', 'PGRST201', 'PGRST204'].includes(error.code)
+}
+
 /** Shape of a `crop_listings` row, optionally joined with the owning farmer's profile. */
 export interface CropListingRow {
   id: string

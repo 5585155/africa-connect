@@ -91,13 +91,32 @@ function LocalAuthProvider({ children }: { children: ReactNode }) {
 }
 
 // ── Supabase Auth — real sign-up/sign-in backed by auth.users + profiles ───
+/**
+ * Read-only profile lookup used on session restore / sign-in — deliberately
+ * never throws and never writes: a failed read here can't distinguish "no
+ * row exists" from "a transient network/schema hiccup", so self-healing by
+ * upserting (like ensureProfile does right after a fresh signUp, where we
+ * actually know the intended name/role) would risk clobbering a real
+ * profile with a guess. Worst case on failure: the session is still valid
+ * and `user` is still set, just with a generic name/role fallback.
+ */
 async function fetchProfile(userId: string, email: string): Promise<AuthUser> {
-  const { data, error } = await supabase!.from('profiles').select('full_name, role').eq('id', userId).single()
-  if (error || !data) {
-    console.error('[AuthContext] failed to load profile', error)
+  try {
+    const { data, error } = await supabase!.from('profiles').select('full_name, role').eq('id', userId).single()
+    if (error || !data) {
+      console.error('[AuthContext] failed to load profile — falling back to a generic buyer profile', {
+        code: error?.code,
+        message: error?.message,
+        details: error?.details,
+        hint: error?.hint,
+      })
+      return { id: userId, name: email.split('@')[0] ?? 'there', email, role: 'buyer' }
+    }
+    return { id: userId, name: data.full_name, email, role: data.role as Role }
+  } catch (error) {
+    console.error('[AuthContext] profile lookup threw — falling back to a generic buyer profile', error)
     return { id: userId, name: email.split('@')[0] ?? 'there', email, role: 'buyer' }
   }
-  return { id: userId, name: data.full_name, email, role: data.role as Role }
 }
 
 /**
