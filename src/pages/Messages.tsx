@@ -14,6 +14,9 @@ export default function Messages() {
   const [offerPrice, setOfferPrice] = useState('')
   const [showOfferInput, setShowOfferInput] = useState(false)
   const [showEscrowModal, setShowEscrowModal] = useState(false)
+  // Set when "Fund Escrow" is triggered from a specific offer bubble, so the
+  // modal charges the negotiated price rather than the original listing price.
+  const [escrowUnitPriceUSD, setEscrowUnitPriceUSD] = useState<number | null>(null)
 
   useEffect(() => {
     const fromUrl = searchParams.get('thread')
@@ -30,6 +33,7 @@ export default function Messages() {
     setSearchParams({ thread: id })
     setShowOfferInput(false)
     setShowEscrowModal(false)
+    setEscrowUnitPriceUSD(null)
   }
 
   function handleSend(event: FormEvent) {
@@ -47,9 +51,16 @@ export default function Messages() {
     setShowOfferInput(false)
   }
 
+  /** Opens the escrow modal — `unitPriceUSD` overrides the order's original listing price when funding a specific negotiated offer. */
+  function openEscrowModal(unitPriceUSD?: number) {
+    setEscrowUnitPriceUSD(unitPriceUSD ?? null)
+    setShowEscrowModal(true)
+  }
+
   function handleConfirmEscrow(result: EscrowPaymentResult) {
     if (!activeThread || !activeOrder) return
-    const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, activeOrder.unitPriceUSD)
+    const unitPriceUSD = escrowUnitPriceUSD ?? activeOrder.unitPriceUSD
+    const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, unitPriceUSD)
     fundEscrow(activeOrder.id, { logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
 
     const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
@@ -61,6 +72,7 @@ export default function Messages() {
       'escrow',
     )
     setShowEscrowModal(false)
+    setEscrowUnitPriceUSD(null)
   }
 
   if (loading) {
@@ -138,24 +150,52 @@ export default function Messages() {
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto p-5">
-                {activeThread.messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm ${
-                      message.sender === 'them'
-                        ? 'bg-sand-100 text-earth-950'
-                        : 'ml-auto bg-earth-800 text-white'
-                    } ${message.kind === 'offer' ? 'border border-clay-600/40' : ''} ${
-                      message.kind === 'escrow' ? 'border border-earth-600/50' : ''
-                    }`}
-                  >
-                    {message.kind === 'offer' && <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">💵 Offer</p>}
-                    {message.kind === 'escrow' && (
-                      <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">🔒 Escrow</p>
-                    )}
-                    {message.text}
-                  </div>
-                ))}
+                {activeThread.messages.map((message) => {
+                  const isMe = message.sender !== 'them'
+                  const offerUnitPriceUSD = message.priceOffer ?? activeOrder?.unitPriceUSD
+                  return (
+                    <div
+                      key={message.id}
+                      className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm ${
+                        message.sender === 'them' ? 'bg-sand-100 text-earth-950' : 'ml-auto bg-earth-800 text-white'
+                      } ${message.kind === 'offer' ? 'border border-clay-600/40' : ''} ${
+                        message.kind === 'escrow' ? 'border border-earth-600/50' : ''
+                      }`}
+                    >
+                      {message.kind === 'offer' && <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">💵 Offer</p>}
+                      {message.kind === 'escrow' && (
+                        <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">🔒 Escrow</p>
+                      )}
+                      {message.text}
+
+                      {message.kind === 'offer' &&
+                        (activeOrder ? (
+                          activeOrder.status === 'Inquiry Sent' ? (
+                            <button
+                              type="button"
+                              onClick={() => openEscrowModal(offerUnitPriceUSD)}
+                              className={`mt-2 block w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                                isMe
+                                  ? 'bg-white/15 text-white hover:bg-white/25'
+                                  : 'bg-earth-800 text-white hover:bg-earth-700'
+                              }`}
+                            >
+                              🔒 Fund Escrow — $
+                              {((offerUnitPriceUSD ?? 0) * activeOrder.quantity).toLocaleString()}
+                            </button>
+                          ) : (
+                            <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
+                              ✓ Escrow {activeOrder.status.toLowerCase()}
+                            </p>
+                          )
+                        ) : (
+                          <p className={`mt-2 text-xs ${isMe ? 'text-sand-100/80' : 'text-earth-700/70'}`}>
+                            No linked order yet — this offer can't be funded directly.
+                          </p>
+                        ))}
+                    </div>
+                  )
+                })}
               </div>
 
               <div className="border-t border-sand-200 p-4">
@@ -191,7 +231,7 @@ export default function Messages() {
                   {activeOrder && activeOrder.status === 'Inquiry Sent' && (
                     <button
                       type="button"
-                      onClick={() => setShowEscrowModal(true)}
+                      onClick={() => openEscrowModal()}
                       className="rounded-full border border-earth-600/40 bg-earth-600/10 px-3 py-1.5 text-xs font-semibold text-earth-700 hover:bg-earth-600/20"
                     >
                       🔒 Fund Escrow Trade
@@ -227,9 +267,12 @@ export default function Messages() {
           orderId={activeOrder.id}
           cropName={activeOrder.cropName}
           quantity={activeOrder.quantity}
-          unitPriceUSD={activeOrder.unitPriceUSD}
+          unitPriceUSD={escrowUnitPriceUSD ?? activeOrder.unitPriceUSD}
           onConfirm={handleConfirmEscrow}
-          onClose={() => setShowEscrowModal(false)}
+          onClose={() => {
+            setShowEscrowModal(false)
+            setEscrowUnitPriceUSD(null)
+          }}
         />
       )}
     </div>

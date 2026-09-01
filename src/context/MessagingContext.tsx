@@ -12,6 +12,8 @@ export interface ChatMessage {
   kind: MessageKind
   text: string
   timestamp: number
+  /** Proposed price ($/ton) on an `offer`-kind message — lets the UI fund escrow at the negotiated price. */
+  priceOffer?: number
 }
 
 export interface Thread {
@@ -105,13 +107,14 @@ function LocalMessagingProvider({ children }: { children: ReactNode }) {
   )
 
   const sendMessage = useCallback(
-    (threadId: string, text: string, kind: MessageKind = 'text') => {
+    (threadId: string, text: string, kind: MessageKind = 'text', priceOffer?: number) => {
       const message: ChatMessage = {
         id: nextId('msg'),
         sender: 'me',
         kind,
         text,
         timestamp: Date.now(),
+        priceOffer,
       }
       setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, message] } : t)))
 
@@ -122,6 +125,7 @@ function LocalMessagingProvider({ children }: { children: ReactNode }) {
           kind,
           text: pickReply(kind),
           timestamp: Date.now(),
+          priceOffer,
         }
         setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, messages: [...t.messages, reply] } : t)))
       }, 1200)
@@ -204,6 +208,7 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
           kind: m.kind as MessageKind,
           text: m.text,
           timestamp: new Date(m.created_at).getTime(),
+          priceOffer: typeof m.price_offer === 'number' ? m.price_offer : undefined,
         })),
     }))
 
