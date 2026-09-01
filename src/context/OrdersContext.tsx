@@ -27,7 +27,7 @@ interface EscrowBreakdown {
 interface OrdersContextValue {
   orders: Order[]
   loading: boolean
-  createOrder: (params: CreateOrderParams) => string
+  createOrder: (params: CreateOrderParams) => Promise<string>
   fundEscrow: (orderId: string, breakdown: EscrowBreakdown) => void
   advanceOrder: (orderId: string) => void
   getOrderByThread: (threadId: string) => Order | undefined
@@ -41,7 +41,7 @@ function LocalOrdersProvider({ children }: { children: ReactNode }) {
   const idCounter = useRef(0)
 
   const createOrder = useCallback(
-    (params: CreateOrderParams) => {
+    async (params: CreateOrderParams) => {
       let orderId = ''
       setOrders((prev) => {
         const existing = prev.find((o) => o.threadId === params.threadId)
@@ -174,7 +174,7 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
   }, [user?.id, load])
 
   const createOrder = useCallback(
-    (params: CreateOrderParams) => {
+    async (params: CreateOrderParams) => {
       if (!user?.id) throw new Error('You need to be signed in to start an order.')
       if (!params.farmerId) {
         // `orders.farmer_id` is NOT NULL in the schema — mirrors the same guard
@@ -183,7 +183,26 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
         // on its own.
         throw new Error("This listing isn't linked to a farmer account yet, so an order can't be created for it.")
       }
-      supabase!
+
+      // Idempotent by conversation: `orders` has no unique constraint on
+      // conversation_id, so re-contacting a farmer for a thread that already
+      // has a linked order (the common case — Contact Farmer reopens an
+      // existing conversation) must reuse that order instead of inserting a
+      // fresh 'Inquiry Sent' row that would shadow one that may already be
+      // funded (getOrderByThread resolves to the newest order per thread).
+      const { data: existing, error: findError } = await supabase!
+        .from('orders')
+        .select('id')
+        .eq('conversation_id', params.threadId)
+        .maybeSingle()
+
+      if (findError) {
+        console.error('[OrdersContext] failed to check for an existing order', findError)
+      } else if (existing) {
+        return existing.id as string
+      }
+
+      const { data: inserted, error } = await supabase!
         .from('orders')
         .insert({
           conversation_id: params.threadId,
@@ -195,10 +214,27 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
           total_amount: params.quantity * params.unitPriceUSD,
           escrow_status: 'Inquiry Sent',
         })
-        .then(({ error }) => error && console.error('[OrdersContext] createOrder failed', error))
-      return ''
+        .select('id')
+        .single()
+
+      if (error || !inserted) {
+        console.error('[OrdersContext] createOrder failed', {
+          code: error?.code,
+          message: error?.message,
+          details: error?.details,
+          hint: error?.hint,
+        })
+        throw new Error(error?.message || 'Could not create an order for this conversation. Please try again.')
+      }
+
+      // Awaited so a caller that immediately navigates to /messages (like
+      // ProductDetailModal) finds the order already in state — without this,
+      // the offer bubble would render "No linked order yet" until the
+      // postgres_changes subscription below happened to fire a reload.
+      await load()
+      return inserted.id as string
     },
-    [user],
+    [user, load],
   )
 
   const fundEscrow = useCallback((orderId: string, breakdown: EscrowBreakdown) => {

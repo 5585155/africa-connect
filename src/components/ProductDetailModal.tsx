@@ -89,7 +89,11 @@ export default function ProductDetailModal({
         throw new Error('Could not start this conversation. Please try again.')
       }
 
-      createOrder({
+      // Awaited so the order row is guaranteed to exist (idempotent — reuses
+      // the existing order when this thread already has one) before we hand
+      // off to /messages, instead of firing the insert and hoping it lands
+      // before that page renders the offer bubble.
+      await createOrder({
         threadId,
         listingId: listing.id,
         cropName: listing.cropName,
