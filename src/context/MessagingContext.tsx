@@ -4,7 +4,7 @@ import { isSchemaMismatchError } from '../lib/supabaseMappers'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { useAuth } from './AuthContext'
 
-export type MessageKind = 'text' | 'offer' | 'escrow'
+export type MessageKind = 'text' | 'offer' | 'offer_accepted' | 'escrow'
 
 export interface ChatMessage {
   id: string
@@ -51,6 +51,10 @@ const REPLY_BANK: Record<MessageKind, string[]> = {
   offer: [
     "Received your offer — let me check with my cooperative and get back to you shortly.",
     "That's close to what I had in mind. Could you confirm the quantity and I'll match it?",
+  ],
+  offer_accepted: [
+    "Great — go ahead and fund escrow whenever you're ready.",
+    "Confirmed on my end. Looking forward to the trade.",
   ],
   escrow: [
     "Escrow trade accepted on my end — funds will be released once delivery is confirmed.",

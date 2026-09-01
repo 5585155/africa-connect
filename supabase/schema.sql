@@ -120,9 +120,14 @@ create table if not exists public.messages (
   sender_id uuid references public.profiles (id) on delete set null,
   text text not null,
   price_offer numeric,
-  kind text not null default 'text' check (kind in ('text', 'offer', 'escrow')),
+  kind text not null default 'text' check (kind in ('text', 'offer', 'offer_accepted', 'escrow')),
   created_at timestamptz not null default now()
 );
+
+-- Upgrades a messages table created before 'offer_accepted' was a valid kind.
+alter table public.messages drop constraint if exists messages_kind_check;
+alter table public.messages add constraint messages_kind_check
+  check (kind in ('text', 'offer', 'offer_accepted', 'escrow'));
 
 create index if not exists messages_conversation_id_idx on public.messages (conversation_id);
 

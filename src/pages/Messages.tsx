@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import EscrowPaymentModal, { computeEscrowBreakdown, type EscrowPaymentResult } from '../components/EscrowPaymentModal'
 import OrderStatusTracker from '../components/OrderStatusTracker'
+import { useAuth } from '../context/AuthContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
 
 export default function Messages() {
+  const { user } = useAuth()
   const { threads, loading, sendMessage } = useMessaging()
   const { getOrderByThread, fundEscrow } = useOrders()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -17,6 +19,7 @@ export default function Messages() {
   // Set when "Fund Escrow" is triggered from a specific offer bubble, so the
   // modal charges the negotiated price rather than the original listing price.
   const [escrowUnitPriceUSD, setEscrowUnitPriceUSD] = useState<number | null>(null)
+  const [acceptError, setAcceptError] = useState<string | null>(null)
 
   useEffect(() => {
     const fromUrl = searchParams.get('thread')
@@ -27,6 +30,21 @@ export default function Messages() {
 
   const activeThread = threads.find((t) => t.id === activeId) ?? null
   const activeOrder = activeThread ? getOrderByThread(activeThread.id) : undefined
+  // Only the buyer actually pays into escrow — the farmer sees the same
+  // accepted offer but as a read-only "waiting on buyer" note, not a button
+  // that would open a payment modal for money that isn't theirs to send.
+  const isBuyerViewing = Boolean(
+    activeOrder && (user?.id ? user.id === activeOrder.buyerId : user?.name === activeOrder.buyerName),
+  )
+
+  // Only the most recent offer is actionable — once it's superseded by a
+  // newer counter-offer, older ones are just history. "Accepted" means a
+  // later `offer_accepted` message exists after it in the thread.
+  const messages = activeThread?.messages ?? []
+  const lastOfferId = [...messages].reverse().find((m) => m.kind === 'offer')?.id ?? null
+  const lastOfferIndex = lastOfferId ? messages.findIndex((m) => m.id === lastOfferId) : -1
+  const isLastOfferAccepted =
+    lastOfferIndex >= 0 && messages.slice(lastOfferIndex + 1).some((m) => m.kind === 'offer_accepted')
 
   function selectThread(id: string) {
     setActiveId(id)
@@ -34,6 +52,7 @@ export default function Messages() {
     setShowOfferInput(false)
     setShowEscrowModal(false)
     setEscrowUnitPriceUSD(null)
+    setAcceptError(null)
   }
 
   function handleSend(event: FormEvent) {
@@ -49,6 +68,28 @@ export default function Messages() {
     sendMessage(activeThread.id, `Counter-offer: $${offerPrice} / ton`, 'offer', Number(offerPrice))
     setOfferPrice('')
     setShowOfferInput(false)
+  }
+
+  /**
+   * Recipient-side "Accept Offer" — records acceptance as its own message so
+   * there's a clear, auditable moment the negotiated price was agreed to,
+   * which is what unlocks that offer's Fund Escrow button for the sender.
+   * Doesn't touch `orders.escrow_status` — an accepted-but-unfunded offer is
+   * still exactly what `'Inquiry Sent'` already means; there's no separate
+   * "pending escrow" stage in the schema (see OrderStatusTracker's four
+   * canonical stages), and adding one would be a status value nothing else
+   * in the app — the check constraint, the tracker UI — recognizes.
+   */
+  function handleAcceptOffer(priceOffer: number | undefined) {
+    if (!activeThread || priceOffer == null) return
+    if (!activeOrder) {
+      setAcceptError(
+        "This conversation isn't linked to an order yet, so there's nothing to accept into. This normally happens automatically when the buyer first made contact.",
+      )
+      return
+    }
+    setAcceptError(null)
+    sendMessage(activeThread.id, `✅ Accepted offer of $${priceOffer.toLocaleString()}/ton`, 'offer_accepted', priceOffer)
   }
 
   /** Opens the escrow modal — `unitPriceUSD` overrides the order's original listing price when funding a specific negotiated offer. */
@@ -150,53 +191,80 @@ export default function Messages() {
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto p-5">
-                {activeThread.messages.map((message) => {
+                {messages.map((message) => {
                   const isMe = message.sender !== 'them'
                   const offerUnitPriceUSD = message.priceOffer ?? activeOrder?.unitPriceUSD
+                  const isLastOffer = message.kind === 'offer' && message.id === lastOfferId
+
                   return (
                     <div
                       key={message.id}
                       className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm ${
                         message.sender === 'them' ? 'bg-sand-100 text-earth-950' : 'ml-auto bg-earth-800 text-white'
                       } ${message.kind === 'offer' ? 'border border-clay-600/40' : ''} ${
-                        message.kind === 'escrow' ? 'border border-earth-600/50' : ''
-                      }`}
+                        message.kind === 'offer_accepted' ? 'border border-earth-600/50' : ''
+                      } ${message.kind === 'escrow' ? 'border border-earth-600/50' : ''}`}
                     >
                       {message.kind === 'offer' && <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">💵 Offer</p>}
+                      {message.kind === 'offer_accepted' && (
+                        <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">✅ Offer Accepted</p>
+                      )}
                       {message.kind === 'escrow' && (
                         <p className="mb-0.5 text-xs font-bold uppercase tracking-wide">🔒 Escrow</p>
                       )}
                       {message.text}
 
-                      {message.kind === 'offer' &&
-                        (activeOrder ? (
-                          activeOrder.status === 'Inquiry Sent' ? (
+                      {/* Older, superseded offers get no action — only the most recent one is live. */}
+                      {isLastOffer &&
+                        (!activeOrder ? (
+                          <p className={`mt-2 text-xs ${isMe ? 'text-sand-100/80' : 'text-earth-700/70'}`}>
+                            No linked order yet — this offer can't be accepted or funded directly.
+                          </p>
+                        ) : activeOrder.status !== 'Inquiry Sent' ? (
+                          <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
+                            ✓ Escrow {activeOrder.status.toLowerCase()}
+                          </p>
+                        ) : !isLastOfferAccepted ? (
+                          isMe ? (
+                            <p className="mt-2 text-xs font-medium text-sand-100">
+                              ⏳ Waiting for {activeThread.counterpartName} to accept…
+                            </p>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => openEscrowModal(offerUnitPriceUSD)}
-                              className={`mt-2 block w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                                isMe
-                                  ? 'bg-white/15 text-white hover:bg-white/25'
-                                  : 'bg-earth-800 text-white hover:bg-earth-700'
-                              }`}
+                              onClick={() => handleAcceptOffer(message.priceOffer)}
+                              className="mt-2 block w-full rounded-lg bg-earth-800 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-earth-700"
                             >
-                              🔒 Fund Escrow — $
-                              {((offerUnitPriceUSD ?? 0) * activeOrder.quantity).toLocaleString()}
+                              ✅ Accept Offer — ${(message.priceOffer ?? 0).toLocaleString()}/ton
                             </button>
-                          ) : (
-                            <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
-                              ✓ Escrow {activeOrder.status.toLowerCase()}
-                            </p>
                           )
+                        ) : isBuyerViewing ? (
+                          <button
+                            type="button"
+                            onClick={() => openEscrowModal(offerUnitPriceUSD)}
+                            className={`mt-2 block w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                              isMe
+                                ? 'bg-white/15 text-white hover:bg-white/25'
+                                : 'bg-earth-800 text-white hover:bg-earth-700'
+                            }`}
+                          >
+                            🔒 Fund Escrow — ${((offerUnitPriceUSD ?? 0) * activeOrder.quantity).toLocaleString()}
+                          </button>
                         ) : (
-                          <p className={`mt-2 text-xs ${isMe ? 'text-sand-100/80' : 'text-earth-700/70'}`}>
-                            No linked order yet — this offer can't be funded directly.
+                          <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
+                            ✓ Accepted — waiting for the buyer to fund escrow
                           </p>
                         ))}
                     </div>
                   )
                 })}
               </div>
+
+              {acceptError && (
+                <p role="alert" className="mx-5 mb-2 rounded-lg bg-clay-600/10 px-3 py-2 text-sm text-clay-700">
+                  {acceptError}
+                </p>
+              )}
 
               <div className="border-t border-sand-200 p-4">
                 {showOfferInput && (
@@ -228,15 +296,21 @@ export default function Messages() {
                   >
                     💵 Counter-offer
                   </button>
-                  {activeOrder && activeOrder.status === 'Inquiry Sent' && (
-                    <button
-                      type="button"
-                      onClick={() => openEscrowModal()}
-                      className="rounded-full border border-earth-600/40 bg-earth-600/10 px-3 py-1.5 text-xs font-semibold text-earth-700 hover:bg-earth-600/20"
-                    >
-                      🔒 Fund Escrow Trade
-                    </button>
-                  )}
+                  {activeOrder &&
+                    activeOrder.status === 'Inquiry Sent' &&
+                    isBuyerViewing &&
+                    // Block funding at the original listing price while a
+                    // counter-offer is still awaiting the farmer's acceptance
+                    // — otherwise the buyer could bypass their own negotiation.
+                    (!lastOfferId || isLastOfferAccepted) && (
+                      <button
+                        type="button"
+                        onClick={() => openEscrowModal()}
+                        className="rounded-full border border-earth-600/40 bg-earth-600/10 px-3 py-1.5 text-xs font-semibold text-earth-700 hover:bg-earth-600/20"
+                      >
+                        🔒 Fund Escrow Trade
+                      </button>
+                    )}
                 </div>
 
                 <form onSubmit={handleSend} className="flex gap-2">
