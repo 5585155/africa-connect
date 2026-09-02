@@ -204,7 +204,7 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
 
       const { data: inserted, error } = await supabase!
         .from('orders')
-        .insert({
+        .upsert({
           conversation_id: params.threadId,
           buyer_id: user.id,
           farmer_id: params.farmerId,
@@ -213,11 +213,25 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
           unit_price_usd: params.unitPriceUSD,
           total_amount: params.quantity * params.unitPriceUSD,
           escrow_status: 'Inquiry Sent',
-        })
+        }, { onConflict: 'conversation_id', ignoreDuplicates: true })
         .select('id')
-        .single()
+        .maybeSingle()
 
-      if (error || !inserted) {
+      let orderId = inserted?.id as string | undefined
+      if (!error && !orderId) {
+        const { data: winner, error: winnerError } = await supabase!
+          .from('orders')
+          .select('id')
+          .eq('conversation_id', params.threadId)
+          .single()
+        if (winnerError) {
+          console.error('[OrdersContext] failed to resolve concurrent order creation', winnerError)
+        } else {
+          orderId = winner.id as string
+        }
+      }
+
+      if (error || !orderId) {
         console.error('[OrdersContext] createOrder failed', {
           code: error?.code,
           message: error?.message,
@@ -232,7 +246,7 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
       // the offer bubble would render "No linked order yet" until the
       // postgres_changes subscription below happened to fire a reload.
       await load()
-      return inserted.id as string
+      return orderId
     },
     [user, load],
   )

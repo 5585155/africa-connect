@@ -156,6 +156,10 @@ create table if not exists public.orders (
 -- Upgrades an orders table created before receipt_reference existed.
 alter table public.orders add column if not exists receipt_reference text;
 
+-- Enforce one escrow lifecycle per conversation. PostgreSQL permits multiple
+-- NULL values while preventing concurrent requests from creating duplicates.
+create unique index if not exists orders_conversation_id_key on public.orders (conversation_id);
+
 create index if not exists orders_buyer_id_idx on public.orders (buyer_id);
 create index if not exists orders_farmer_id_idx on public.orders (farmer_id);
 

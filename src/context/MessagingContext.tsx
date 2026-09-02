@@ -251,11 +251,32 @@ function SupabaseMessagingProvider({ children }: { children: ReactNode }) {
       const existing = threads.find((t) => t.listingId === listingId)
       if (existing) return existing.id
 
+      // Let the database's unique(buyer_id, crop_id) constraint atomically
+      // decide which request creates the thread. Only the creator inserts the
+      // greeting, so cache misses, double-clicks, and multiple tabs cannot
+      // append duplicate initial inquiries.
       const { data: conversation, error } = await supabase!
         .from('conversations')
-        .upsert({ buyer_id: user.id, farmer_id: counterpartId, crop_id: listingId }, { onConflict: 'buyer_id,crop_id' })
+        .insert({ buyer_id: user.id, farmer_id: counterpartId, crop_id: listingId })
         .select()
         .single()
+
+      if (error?.code === '23505') {
+        const { data: serverThread, error: findError } = await supabase!
+          .from('conversations')
+          .select('id')
+          .eq('buyer_id', user.id)
+          .eq('crop_id', listingId)
+          .single()
+
+        if (findError || !serverThread) {
+          console.error('[MessagingContext] failed to resolve existing conversation', findError)
+          throw new Error(findError?.message || 'Could not reopen this conversation. Please try again.')
+        }
+
+        await load()
+        return serverThread.id as string
+      }
 
       if (error || !conversation) {
         console.error('[MessagingContext] failed to start conversation', error)
