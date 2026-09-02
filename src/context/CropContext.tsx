@@ -39,6 +39,51 @@ function LocalCropProvider({ children }: { children: ReactNode }) {
 }
 
 // ── Supabase-backed, with realtime sync across devices ─────────────────────
+/**
+ * Fetches the farmer identity for a signed-out request. `profiles` itself is
+ * RLS-locked to `authenticated`, so an embedded `profiles(full_name)` join
+ * (the authenticated path below) silently comes back null for every row when
+ * called anonymously — this is the actual cause of "Unknown Farmer" showing
+ * for anyone browsing the Marketplace signed out. `profiles_public` is a
+ * narrow view (id, full_name, avatar_url only — no role/email/phone) scoped
+ * to farmers who actually have a listing, granted to `anon`; PostgREST
+ * foreign-key embedding through it isn't relied on — this fetches listings
+ * and farmer identities separately and merges them client-side instead.
+ */
+async function loadListingsAnonymous(): Promise<{ data: CropListingRow[] | null; error: unknown }> {
+  const { data: rows, error } = await supabase!
+    .from('crop_listings')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error || !rows) return { data: null, error }
+
+  const farmerIds = [...new Set(rows.map((r) => r.farmer_id).filter((id): id is string => Boolean(id)))]
+
+  let farmerById = new Map<string, { full_name: string; avatar_url: string | null }>()
+  if (farmerIds.length > 0) {
+    const { data: farmers, error: farmersError } = await supabase!
+      .from('profiles_public')
+      .select('id, full_name, avatar_url')
+      .in('id', farmerIds)
+
+    if (farmersError) {
+      // Listings themselves loaded fine — degrade to "Unknown Farmer" rather
+      // than failing the whole Marketplace over a display-name lookup.
+      console.error('[CropContext] failed to load public farmer profiles', farmersError)
+    } else {
+      farmerById = new Map((farmers ?? []).map((f) => [f.id as string, f]))
+    }
+  }
+
+  const merged: CropListingRow[] = rows.map((row) => {
+    const farmer = row.farmer_id ? farmerById.get(row.farmer_id) : undefined
+    return { ...row, profiles: farmer ? { full_name: farmer.full_name, avatar_url: farmer.avatar_url } : null }
+  })
+
+  return { data: merged, error: null }
+}
+
 function SupabaseCropProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [listings, setListings] = useState<SellerListing[]>([])
@@ -48,10 +93,14 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function load() {
-      const { data, error } = await supabase!
-        .from('crop_listings')
-        .select('*, profiles(full_name)')
-        .order('created_at', { ascending: false })
+      // Authenticated: `profiles` RLS allows `authenticated` to read every
+      // row, so the embedded join resolves farmer names correctly as-is.
+      const { data, error } = user
+        ? await supabase!
+            .from('crop_listings')
+            .select('*, profiles(full_name, avatar_url)')
+            .order('created_at', { ascending: false })
+        : await loadListingsAnonymous()
 
       console.log('[Marketplace] Query result:', { data, error })
 
@@ -76,7 +125,7 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
       cancelled = true
       supabase!.removeChannel(channel)
     }
-  }, [])
+  }, [user])
 
   const addListing = useCallback(
     (listing: SellerListing) => {

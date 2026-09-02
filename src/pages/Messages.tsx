@@ -222,7 +222,7 @@ export default function Messages() {
                           </p>
                         ) : activeOrder.status !== 'Inquiry Sent' ? (
                           <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
-                            ✓ Escrow {activeOrder.status.toLowerCase()}
+                            ✓ {activeOrder.status}
                           </p>
                         ) : !isLastOfferAccepted ? (
                           isMe ? (

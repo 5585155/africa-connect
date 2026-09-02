@@ -160,6 +160,16 @@ alter table public.orders add column if not exists receipt_reference text;
 -- NULL values while preventing concurrent requests from creating duplicates.
 create unique index if not exists orders_conversation_id_key on public.orders (conversation_id);
 
+-- Upgrades an orders table whose escrow_status check constraint predates (or
+-- otherwise diverged from) this 4-stage lifecycle — `create table if not
+-- exists` above never re-applies to an already-existing table, so without
+-- this, a live project created before 'Inquiry Sent' was added here would
+-- reject every new order with "violates check constraint
+-- orders_escrow_status_check". Same pattern as messages_kind_check below.
+alter table public.orders drop constraint if exists orders_escrow_status_check;
+alter table public.orders add constraint orders_escrow_status_check
+  check (escrow_status in ('Inquiry Sent', 'Escrow Funded', 'Logistics Scheduled', 'Delivered & Released'));
+
 create index if not exists orders_buyer_id_idx on public.orders (buyer_id);
 create index if not exists orders_farmer_id_idx on public.orders (farmer_id);
 
@@ -206,6 +216,23 @@ create table if not exists public.transactions (
 );
 
 create index if not exists transactions_user_id_idx on public.transactions (user_id);
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- profiles_public — narrow, publicly-readable projection of profiles, so
+-- anonymous Marketplace visitors can see farmer names/avatars without
+-- widening profiles' own RLS (which stays authenticated-only below). Scoped
+-- to farmers who actually have a listing; excludes role, email, and phone.
+-- CropContext.tsx queries this directly for anonymous requests rather than
+-- relying on PostgREST FK-embedding through a view.
+-- ─────────────────────────────────────────────────────────────────────────
+create or replace view public.profiles_public as
+select p.id, p.full_name, p.avatar_url
+from public.profiles p
+where exists (
+  select 1 from public.crop_listings cl where cl.farmer_id = p.id
+);
+
+grant select on public.profiles_public to anon, authenticated;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Row Level Security

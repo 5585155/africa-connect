@@ -62,7 +62,14 @@ export interface CropListingRow {
   verified: boolean
   image_url: string | null
   harvest_date: string | null
-  profiles?: { full_name: string } | null
+  /**
+   * The owning farmer's public identity. Populated two different ways
+   * depending on the caller's auth state (see CropContext.tsx): via an
+   * embedded `profiles` join for authenticated requests, or merged in
+   * client-side from a `profiles_public` lookup for anonymous ones — either
+   * way it normalizes to this same shape before reaching rowToListing.
+   */
+  profiles?: { full_name: string; avatar_url?: string | null } | null
 }
 
 export function rowToListing(row: CropListingRow): SellerListing {
@@ -75,6 +82,7 @@ export function rowToListing(row: CropListingRow): SellerListing {
     unitPriceUSD: Number(row.unit_price_usd),
     farmerName: row.profiles?.full_name ?? 'Unknown Farmer',
     farmerId: row.farmer_id ?? undefined,
+    farmerAvatarUrl: row.profiles?.avatar_url ?? undefined,
     verifiedStatus: row.verified,
     harvestDate: row.harvest_date ?? '',
     image: row.image_url ?? '🌱',

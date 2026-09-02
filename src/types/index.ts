@@ -29,6 +29,8 @@ export interface CropListing {
   farmerName: string
   /** Supabase profile id of the owning farmer. Undefined for local mock listings. */
   farmerId?: string
+  /** Farmer's avatar image, when known. Undefined for local mock listings or farmers without one set. */
+  farmerAvatarUrl?: string
   verifiedStatus: boolean
   harvestDate: string
   image: string
