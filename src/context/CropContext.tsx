@@ -40,26 +40,34 @@ function LocalCropProvider({ children }: { children: ReactNode }) {
 
 // ── Supabase-backed, with realtime sync across devices ─────────────────────
 /**
- * Fetches the farmer identity for a signed-out request. `profiles` itself is
- * RLS-locked to `authenticated`, so an embedded `profiles(full_name)` join
- * (the authenticated path below) silently comes back null for every row when
- * called anonymously — this is the actual cause of "Unknown Farmer" showing
- * for anyone browsing the Marketplace signed out. `profiles_public` is a
- * narrow view (id, full_name, avatar_url only — no role/email/phone) scoped
- * to farmers who actually have a listing, granted to `anon`; PostgREST
- * foreign-key embedding through it isn't relied on — this fetches listings
- * and farmer identities separately and merges them client-side instead.
+ * Fetches crop_listings and merges in each farmer's public identity as two
+ * separate queries, for both anonymous and authenticated callers alike —
+ * used to rely on an embedded `.select('*, profiles(full_name)')` join for
+ * authenticated requests, on the theory that `profiles`' `to authenticated`
+ * RLS policy would let it resolve cleanly there. In production that embed
+ * came back empty for at least one real farmer session despite `profiles`
+ * being fully readable to them, which is exactly the kind of PostgREST
+ * embedding fragility `profiles_public` was already introduced to route
+ * around for anonymous requests — so it's now the only path, for everyone.
+ * `profiles_public` (id, full_name, avatar_url only — no role/email/phone)
+ * is readable by both `anon` and `authenticated`, so this needs no branch.
  */
-async function loadListingsAnonymous(): Promise<{ data: CropListingRow[] | null; error: unknown }> {
+async function loadListingsWithPublicProfiles(): Promise<{ data: CropListingRow[] | null; error: unknown }> {
   const { data: rows, error } = await supabase!
     .from('crop_listings')
     .select('*')
     .order('created_at', { ascending: false })
 
-  if (error || !rows) return { data: null, error }
+  if (error || !rows) {
+    console.error('[CropContext] failed to load crop_listings', error)
+    return { data: null, error }
+  }
 
   const farmerIds = [...new Set(rows.map((r) => r.farmer_id).filter((id): id is string => Boolean(id)))]
 
+  // A farmer-profile lookup failure must never take the listing feed down
+  // with it — every row survives regardless, just with its farmer identity
+  // (and rowToListing's "Unknown Farmer" fallback) left unresolved.
   let farmerById = new Map<string, { full_name: string; avatar_url: string | null }>()
   if (farmerIds.length > 0) {
     const { data: farmers, error: farmersError } = await supabase!
@@ -68,14 +76,14 @@ async function loadListingsAnonymous(): Promise<{ data: CropListingRow[] | null;
       .in('id', farmerIds)
 
     if (farmersError) {
-      // Listings themselves loaded fine — degrade to "Unknown Farmer" rather
-      // than failing the whole Marketplace over a display-name lookup.
       console.error('[CropContext] failed to load public farmer profiles', farmersError)
     } else {
       farmerById = new Map((farmers ?? []).map((f) => [f.id as string, f]))
     }
   }
 
+  // `...row` preserves farmer_id (and every other raw column) untouched —
+  // only `profiles` is added/overwritten with the resolved-or-null identity.
   const merged: CropListingRow[] = rows.map((row) => {
     const farmer = row.farmer_id ? farmerById.get(row.farmer_id) : undefined
     return { ...row, profiles: farmer ? { full_name: farmer.full_name, avatar_url: farmer.avatar_url } : null }
@@ -93,14 +101,7 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function load() {
-      // Authenticated: `profiles` RLS allows `authenticated` to read every
-      // row, so the embedded join resolves farmer names correctly as-is.
-      const { data, error } = user
-        ? await supabase!
-            .from('crop_listings')
-            .select('*, profiles(full_name, avatar_url)')
-            .order('created_at', { ascending: false })
-        : await loadListingsAnonymous()
+      const { data, error } = await loadListingsWithPublicProfiles()
 
       console.log('[Marketplace] Query result:', { data, error })
 
