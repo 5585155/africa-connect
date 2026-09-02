@@ -4,11 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { useCurrency } from '../context/CurrencyContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
+import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
 import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
 import { formatHarvestDate } from '../lib/dates'
 import { isSupabaseConfigured } from '../lib/supabase'
 import type { SellerListing } from '../types'
 import ChartFallback from './ChartFallback'
+import TradeJourneySteps from './TradeJourneySteps'
 
 const PriceTrendChart = lazy(() => import('./PriceTrendChart'))
 
@@ -52,7 +54,7 @@ export default function ProductDetailModal({
   const converted = convert(totalUSD, 'USD', currency)
 
   async function handleContactFarmer() {
-    console.log('[ProductDetailModal] Contact Farmer clicked', {
+    console.log('[ProductDetailModal] Request Quote clicked', {
       listingId: listing.id,
       farmerId: listing.farmerId,
       userId: user?.id ?? null,
@@ -127,8 +129,12 @@ export default function ProductDetailModal({
       >
         <div className="flex items-start justify-between border-b border-sand-200 bg-earth-800 p-6 text-white">
           <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-white/10 text-4xl">
-              {listing.image}
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/10 text-4xl">
+              {isImageSource(listing.image) ? (
+                <img src={listing.image} alt="" className="h-full w-full object-cover" />
+              ) : (
+                cropFallbackIcon(listing.cropName, listing.category)
+              )}
             </div>
             <div>
               <h2 id="product-modal-title" className="text-xl font-bold">
@@ -149,6 +155,10 @@ export default function ProductDetailModal({
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
           </button>
+        </div>
+
+        <div className="border-b border-sand-200 bg-sand-50 px-6 py-4">
+          <TradeJourneySteps current={1} />
         </div>
 
         <div className="p-6">
@@ -190,21 +200,48 @@ export default function ProductDetailModal({
           </dl>
 
           <div className="mt-5">
-            <h3 className="mb-2 text-sm font-semibold text-earth-950">Farm certifications</h3>
-            {listing.certifications.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {listing.certifications.map((cert) => (
-                  <span
-                    key={cert}
-                    className="rounded-full border border-earth-600/30 bg-earth-600/10 px-3 py-1 text-xs font-semibold text-earth-700"
-                  >
-                    {cert}
-                  </span>
-                ))}
+            <h3 className="mb-2 text-sm font-semibold text-earth-950">Specification</h3>
+            <dl className="divide-y divide-sand-200 rounded-xl border border-sand-200 text-sm">
+              <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <dt className="text-earth-700/70">Category</dt>
+                <dd className="font-medium text-earth-950">{listing.category}</dd>
               </div>
-            ) : (
-              <p className="text-sm text-earth-700/70">No certifications on file yet.</p>
-            )}
+              <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <dt className="text-earth-700/70">Country of origin</dt>
+                <dd className="font-medium text-earth-950">{listing.originCountry}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <dt className="text-earth-700/70">Supplier verification</dt>
+                <dd className="font-medium text-earth-950">
+                  {listing.verifiedStatus ? 'Verified farmer' : 'Not yet verified'}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+                <dt className="text-earth-700/70">Export channel</dt>
+                <dd className="font-medium text-earth-950">
+                  {listing.exportMonopoly ? 'State-approved board / LBC aggregator' : 'Direct export'}
+                </dd>
+              </div>
+              <div className="flex flex-col gap-1.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <dt className="text-earth-700/70">Certifications</dt>
+                <dd className="font-medium text-earth-950">
+                  {listing.certifications.length > 0 ? (
+                    <div className="flex flex-wrap justify-end gap-1.5">
+                      {listing.certifications.map((cert) => (
+                        <span
+                          key={cert}
+                          className="rounded-full border border-earth-600/30 bg-earth-600/10 px-2.5 py-0.5 text-xs font-semibold text-earth-700"
+                        >
+                          {cert}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-earth-700/70">None on file</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
           </div>
 
           {(listing.complianceNote || listing.exportMonopoly) && (
@@ -301,7 +338,7 @@ export default function ProductDetailModal({
                 ? 'Starting conversation…'
                 : missingFarmerLink
                   ? 'Not Linked to a Farmer Account'
-                  : 'Contact Farmer'}
+                  : 'Request Quote'}
           </button>
           {missingFarmerLink && (
             <p className="mt-1.5 text-xs text-earth-700/60">

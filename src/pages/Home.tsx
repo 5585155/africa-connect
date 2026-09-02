@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import FeaturedHarvests from '../components/FeaturedHarvests'
 import Hero from '../components/Hero'
+import SourceOrSell from '../components/SourceOrSell'
+import TrustRow from '../components/TrustRow'
 
 export default function Home() {
   const [crop, setCrop] = useState('')
@@ -20,6 +22,8 @@ export default function Home() {
         onLocationChange={setLocation}
         onSubmit={scrollToResults}
       />
+      <SourceOrSell />
+      <TrustRow />
       <FeaturedHarvests
         crop={crop}
         location={location}

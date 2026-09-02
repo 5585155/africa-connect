@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useCrops } from '../context/CropContext'
 import { useOrders } from '../context/OrdersContext'
 import { CERTIFICATION_OPTIONS } from '../data/sellerListings'
+import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
 import type { CropCategory, ListingStatus, SellerListing } from '../types'
 import { ORDER_STAGES } from '../types'
 
@@ -337,10 +338,10 @@ export default function FarmerDashboard() {
                 <tr key={listing.id} className="border-b border-sand-100 last:border-0">
                   <td className="flex items-center gap-3 px-4 py-3">
                     <span className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg bg-sand-100 text-lg">
-                      {listing.image.startsWith('data:') ? (
+                      {isImageSource(listing.image) ? (
                         <img src={listing.image} alt="" className="h-full w-full object-cover" />
                       ) : (
-                        listing.image
+                        cropFallbackIcon(listing.cropName, listing.category)
                       )}
                     </span>
                     <span className="font-medium text-earth-950">{listing.cropName}</span>

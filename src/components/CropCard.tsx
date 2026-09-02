@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCurrency } from '../context/CurrencyContext'
 import { useWatchlist } from '../context/WatchlistContext'
+import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
 import { formatMoney } from '../lib/currency'
 import { formatHarvestDate } from '../lib/dates'
 import type { SellerListing } from '../types'
@@ -34,10 +35,10 @@ export default function CropCard({ listing }: { listing: SellerListing }) {
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sand-100 text-3xl">
-            {listing.image.startsWith('data:') ? (
+            {isImageSource(listing.image) ? (
               <img src={listing.image} alt="" className="h-full w-full object-cover" />
             ) : (
-              listing.image
+              cropFallbackIcon(listing.cropName, listing.category)
             )}
           </div>
           <div className="flex flex-col items-end gap-1.5">
@@ -83,21 +84,38 @@ export default function CropCard({ listing }: { listing: SellerListing }) {
         </div>
 
         <h3 className="mt-4 text-lg font-semibold text-earth-950">{listing.cropName}</h3>
-        <p className="text-sm text-earth-700">{listing.category}</p>
-
-        {listing.complianceNote && (
-          <span className="mt-2 inline-flex w-fit items-center gap-1 rounded-full bg-clay-600/10 px-2.5 py-1 text-xs font-semibold text-clay-700">
-            ⚖️ Export Regulated
-          </span>
-        )}
-
-        <div className="mt-3 flex items-center gap-1.5 text-sm text-earth-800">
-          <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
+        <div className="mt-1 flex items-center gap-1.5 text-sm font-medium text-earth-800">
+          <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-earth-700/70" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 6-7.5 10.5-7.5 10.5S4.5 16.5 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
           </svg>
           {listing.originCountry}
+          <span className="text-earth-700/40">·</span>
+          <span className="font-normal text-earth-700">{listing.category}</span>
         </div>
+
+        {(listing.complianceNote || listing.certifications.length > 0) && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {listing.complianceNote && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-clay-600/10 px-2.5 py-1 text-xs font-semibold text-clay-700">
+                ⚖️ Export Regulated
+              </span>
+            )}
+            {listing.certifications.slice(0, 2).map((cert) => (
+              <span
+                key={cert}
+                className="inline-flex items-center gap-1 rounded-full bg-earth-600/10 px-2.5 py-1 text-xs font-semibold text-earth-700"
+              >
+                {cert}
+              </span>
+            ))}
+            {listing.certifications.length > 2 && (
+              <span className="inline-flex items-center rounded-full bg-sand-100 px-2.5 py-1 text-xs font-semibold text-earth-700/70">
+                +{listing.certifications.length - 2} more
+              </span>
+            )}
+          </div>
+        )}
 
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-sand-200 pt-4 text-sm">
           <div>
@@ -136,7 +154,7 @@ export default function CropCard({ listing }: { listing: SellerListing }) {
           }}
           className="mt-5 rounded-xl bg-earth-800 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-earth-700/60"
         >
-          {soldOut ? 'Sold Out' : 'Contact Farmer'}
+          {soldOut ? 'Sold Out' : 'Request Quote'}
         </button>
       </div>
 
