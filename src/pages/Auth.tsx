@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import type { Role } from '../types'
 
 export default function Auth() {
-  const { signUp, signIn } = useAuth()
+  const { signUp, signIn, resendConfirmation } = useAuth()
   const navigate = useNavigate()
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signup')
@@ -15,6 +15,20 @@ export default function Auth() {
   const [error, setError] = useState<string | null>(null)
   const [checkEmail, setCheckEmail] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [resendStatus, setResendStatus] = useState<string | null>(null)
+
+  async function handleResend() {
+    setResending(true)
+    setResendStatus(null)
+    const result = await resendConfirmation(email)
+    setResending(false)
+    setResendStatus(
+      result.error
+        ? result.error
+        : 'Confirmation requested again. Check your spam folder and allow a few minutes for delivery.',
+    )
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -45,8 +59,34 @@ export default function Auth() {
         </div>
         <h1 className="mt-4 text-2xl font-bold text-earth-950">Check your email</h1>
         <p className="mt-2 text-earth-700">
-          We sent a confirmation link to <strong>{email}</strong>. Confirm it, then come back and log in.
+          A confirmation link was requested for <strong>{email}</strong>. Confirm it, then come back and log in.
         </p>
+        <p className="mt-3 text-sm text-earth-700/75">Check your spam folder and verify that the address is correct.</p>
+        {resendStatus && (
+          <p role="status" className="mt-4 rounded-lg bg-sand-100 px-3 py-2 text-sm text-earth-800">
+            {resendStatus}
+          </p>
+        )}
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-center">
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resending}
+            className="rounded-xl bg-earth-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-earth-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {resending ? 'Requesting…' : 'Resend confirmation'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCheckEmail(false)
+              setResendStatus(null)
+            }}
+            className="rounded-xl border border-sand-300 px-5 py-2.5 text-sm font-semibold text-earth-800 hover:bg-sand-100"
+          >
+            Correct email address
+          </button>
+        </div>
       </div>
     )
   }

@@ -62,6 +62,7 @@ interface AuthContextValue {
   loading: boolean
   signUp: (params: SignUpParams) => Promise<AuthResult>
   signIn: (params: SignInParams) => Promise<AuthResult>
+  resendConfirmation: (email: string) => Promise<{ error?: string }>
   /**
    * Switches the signed-in account's workspace between farmer and buyer.
    * This is a relabel, not a new account — a farmer's listings stay tied to
@@ -91,6 +92,7 @@ function LocalAuthProvider({ children }: { children: ReactNode }) {
         setUser((prev) => ({ name: prev?.name || email.split('@')[0] || 'there', email, role }))
         return { role }
       },
+      resendConfirmation: async () => ({}),
       switchRole: async (role) => {
         setUser((prev) => (prev ? { ...prev, role } : prev))
         return {}
@@ -305,6 +307,22 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         const profile = await fetchProfile(data.user.id, email)
         setUser(profile)
         return { role: profile.role }
+      },
+      resendConfirmation: async (email) => {
+        const { error } = await supabase!.auth.resend({
+          type: 'signup',
+          email: email.trim(),
+          options: { emailRedirectTo: window.location.origin },
+        })
+        if (error) {
+          console.error('[AuthContext] confirmation resend failed', {
+            message: error.message,
+            status: error.status,
+            supabaseUrl,
+          })
+          return { error: error.message }
+        }
+        return {}
       },
       switchRole: async (role) => {
         if (!user?.id) return { error: 'You need to be signed in to switch workspaces.' }
