@@ -102,7 +102,7 @@ export default function Messages() {
     if (!activeThread || !activeOrder) return
     const unitPriceUSD = escrowUnitPriceUSD ?? activeOrder.unitPriceUSD
     const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, unitPriceUSD)
-    fundEscrow(activeOrder.id, { logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
+    fundEscrow(activeOrder.id, { unitPriceUSD, logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
 
     const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
     sendMessage(

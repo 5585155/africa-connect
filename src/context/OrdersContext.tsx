@@ -18,6 +18,8 @@ interface CreateOrderParams {
 }
 
 interface EscrowBreakdown {
+  /** The price actually funded at — the negotiated/accepted offer price when funding from a specific counter-offer, otherwise the order's original listing price. Persisted so the order reflects what was actually paid, not the listing price it started at. */
+  unitPriceUSD: number
   logisticsUSD: number
   escrowFeeUSD: number
   totalUSD: number
@@ -82,6 +84,7 @@ function LocalOrdersProvider({ children }: { children: ReactNode }) {
             ? {
                 ...o,
                 status: 'Escrow Funded',
+                unitPriceUSD: breakdown.unitPriceUSD,
                 logisticsUSD: breakdown.logisticsUSD,
                 escrowFeeUSD: breakdown.escrowFeeUSD,
                 totalUSD: breakdown.totalUSD,
@@ -256,6 +259,7 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
       .from('orders')
       .update({
         escrow_status: 'Escrow Funded',
+        unit_price_usd: breakdown.unitPriceUSD,
         logistics_usd: breakdown.logisticsUSD,
         escrow_fee_usd: breakdown.escrowFeeUSD,
         total_amount: breakdown.totalUSD,
