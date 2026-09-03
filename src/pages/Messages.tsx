@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import EscrowPaymentModal, { computeEscrowBreakdown, type EscrowPaymentResult } from '../components/EscrowPaymentModal'
+import EscrowPaymentModal, { type EscrowPaymentResult } from '../components/EscrowPaymentModal'
+import { computeEscrowBreakdown } from '../lib/escrow'
+import { guardPaymentConfirm, guardPaymentStart } from '../lib/containment'
 import OrderStatusTracker from '../components/OrderStatusTracker'
 import { useAuth } from '../context/AuthContext'
 import { useMessaging } from '../context/MessagingContext'
@@ -36,6 +38,7 @@ export default function Messages() {
   const isBuyerViewing = Boolean(
     activeOrder && (user?.id ? user.id === activeOrder.buyerId : user?.name === activeOrder.buyerName),
   )
+  const paymentStartGuard = guardPaymentStart()
 
   // Only the most recent offer is actionable — once it's superseded by a
   // newer counter-offer, older ones are just history. "Accepted" means a
@@ -98,11 +101,51 @@ export default function Messages() {
     setShowEscrowModal(true)
   }
 
-  function handleConfirmEscrow(result: EscrowPaymentResult) {
+  async function handleConfirmEscrow(result: EscrowPaymentResult) {
     if (!activeThread || !activeOrder) return
+
+    const confirmGuard = guardPaymentConfirm()
+    if (!confirmGuard.allowed) {
+      // Defense in depth for within THIS page load only: the entry point
+      // that opens this modal is already gated below, but if a modal
+      // instance is somehow already showing when this runs, this stops it
+      // here too. This does not and cannot protect a browser tab that has
+      // an older build of this file already loaded in memory — that tab's
+      // JavaScript never calls guardPaymentConfirm at all (see
+      // src/lib/containment.ts). Never call fundEscrow, never claim success
+      // or failure, and never post anything into the shared conversation —
+      // the notice stays local to this viewer only.
+      setAcceptError(confirmGuard.message ?? null)
+      setShowEscrowModal(false)
+      setEscrowUnitPriceUSD(null)
+      return
+    }
+
+    // DEFERRED, NOT VERIFIED — 2026-09-03 containment patch: this branch is
+    // unreachable while ORDER_WRITES_CONTAINED is true (the guard above
+    // returns first), so it has not been exercised. It also has no
+    // try/catch — if fundEscrow ever rejects (as opposed to resolving
+    // false) this await throws unhandled rather than showing an error.
+    // Fix this before relying on this path again, not just before removing
+    // containment.
     const unitPriceUSD = escrowUnitPriceUSD ?? activeOrder.unitPriceUSD
     const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, unitPriceUSD)
-    fundEscrow(activeOrder.id, { unitPriceUSD, logisticsUSD, escrowFeeUSD, totalUSD, receiptReference: result.reference })
+    const funded = await fundEscrow(activeOrder.id, {
+      unitPriceUSD,
+      logisticsUSD,
+      escrowFeeUSD,
+      totalUSD,
+      receiptReference: result.reference,
+    })
+
+    if (!funded) {
+      setAcceptError(
+        'We could not confirm this payment was recorded against your order. Please contact support before paying again.',
+      )
+      setShowEscrowModal(false)
+      setEscrowUnitPriceUSD(null)
+      return
+    }
 
     const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
     sendMessage(
@@ -239,17 +282,23 @@ export default function Messages() {
                             </button>
                           )
                         ) : isBuyerViewing ? (
-                          <button
-                            type="button"
-                            onClick={() => openEscrowModal(offerUnitPriceUSD)}
-                            className={`mt-2 block w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                              isMe
-                                ? 'bg-white/15 text-white hover:bg-white/25'
-                                : 'bg-earth-800 text-white hover:bg-earth-700'
-                            }`}
-                          >
-                            🔒 Fund Escrow — ${((offerUnitPriceUSD ?? 0) * activeOrder.quantity).toLocaleString()}
-                          </button>
+                          !paymentStartGuard.allowed ? (
+                            <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100/80' : 'text-earth-700/70'}`}>
+                              🔒 Fund Escrow temporarily unavailable — {paymentStartGuard.message}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => openEscrowModal(offerUnitPriceUSD)}
+                              className={`mt-2 block w-full rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                                isMe
+                                  ? 'bg-white/15 text-white hover:bg-white/25'
+                                  : 'bg-earth-800 text-white hover:bg-earth-700'
+                              }`}
+                            >
+                              🔒 Fund Escrow — ${((offerUnitPriceUSD ?? 0) * activeOrder.quantity).toLocaleString()}
+                            </button>
+                          )
                         ) : (
                           <p className={`mt-2 text-xs font-medium ${isMe ? 'text-sand-100' : 'text-earth-700'}`}>
                             ✓ Accepted — waiting for the buyer to fund escrow
@@ -302,7 +351,12 @@ export default function Messages() {
                     // Block funding at the original listing price while a
                     // counter-offer is still awaiting the farmer's acceptance
                     // — otherwise the buyer could bypass their own negotiation.
-                    (!lastOfferId || isLastOfferAccepted) && (
+                    (!lastOfferId || isLastOfferAccepted) &&
+                    (!paymentStartGuard.allowed ? (
+                      <span className="rounded-full border border-sand-200 bg-sand-100 px-3 py-1.5 text-xs font-semibold text-earth-700/60">
+                        🔒 Fund Escrow — temporarily unavailable
+                      </span>
+                    ) : (
                       <button
                         type="button"
                         onClick={() => openEscrowModal()}
@@ -310,7 +364,7 @@ export default function Messages() {
                       >
                         🔒 Fund Escrow Trade
                       </button>
-                    )}
+                    ))}
                 </div>
 
                 <form onSubmit={handleSend} className="flex gap-2">

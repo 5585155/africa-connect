@@ -5,20 +5,11 @@ import { formatMoney, type ConverterCurrency } from '../lib/currency'
 import { isFlutterwaveConfigured, openFlutterwaveCheckout } from '../lib/flutterwave'
 import { getStripe, isStripeConfigured } from '../lib/stripe'
 import PaystackButton, { isPaystackConfigured } from './PaystackButton'
-
-const LOGISTICS_RATE_PER_TON = 18
-const ESCROW_FEE_RATE = 0.025
+import { computeEscrowBreakdown } from '../lib/escrow'
+import { guardPaymentStart } from '../lib/containment'
 
 function generateReference(prefix: string): string {
   return `${prefix}-${Date.now()}`
-}
-
-export function computeEscrowBreakdown(quantity: number, unitPriceUSD: number) {
-  const cropCostUSD = quantity * unitPriceUSD
-  const logisticsUSD = quantity * LOGISTICS_RATE_PER_TON
-  const escrowFeeUSD = Math.round(cropCostUSD * ESCROW_FEE_RATE)
-  const totalUSD = cropCostUSD + logisticsUSD + escrowFeeUSD
-  return { cropCostUSD, logisticsUSD, escrowFeeUSD, totalUSD }
 }
 
 export type PaymentMethod = 'flutterwave' | 'stripe' | 'paystack'
@@ -104,6 +95,16 @@ export default function EscrowPaymentModal({
   const methodIsSandbox = method === 'flutterwave' ? !isFlutterwaveConfigured : method === 'stripe' ? !isStripeConfigured : false
 
   async function handlePay() {
+    // Defensive — the button that calls this is not rendered at all while
+    // contained (see the early return in the JSX below), but this guard
+    // stays here too so this function can never initialize a real charge or
+    // a simulation on its own if it's ever reached another way.
+    const guard = guardPaymentStart()
+    if (!guard.allowed) {
+      setStatus('error')
+      setErrorMessage(guard.message ?? null)
+      return
+    }
     if (!method) return
     setStatus('processing')
     setErrorMessage(null)
@@ -164,6 +165,7 @@ export default function EscrowPaymentModal({
   }
 
   const canPay = complianceChecked && method !== null && status !== 'processing'
+  const paymentStartGuard = guardPaymentStart()
 
   return (
     <div
@@ -186,6 +188,23 @@ export default function EscrowPaymentModal({
           </p>
         </div>
 
+        {!paymentStartGuard.allowed ? (
+          // No payment method list, no Pay button, no PaystackButton — none
+          // of the elements that could start a checkout or a simulation are
+          // rendered at all while contained, not just disabled.
+          <div className="p-5">
+            <p role="alert" className="rounded-lg bg-clay-600/10 px-3 py-2.5 text-sm text-clay-700">
+              {paymentStartGuard.message}
+            </p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-4 w-full rounded-xl border border-sand-200 py-2.5 text-sm font-semibold text-earth-800 hover:bg-sand-100"
+            >
+              Close
+            </button>
+          </div>
+        ) : (
         <div className="p-5">
           <dl className="flex flex-col gap-2.5 text-sm">
             <div className="flex items-center justify-between">
@@ -342,6 +361,7 @@ export default function EscrowPaymentModal({
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   )

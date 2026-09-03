@@ -4,6 +4,7 @@ import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { isSchemaMismatchError, rowToOrder, type OrderRow } from '../lib/supabaseMappers'
 import { ORDER_STAGES, type Order } from '../types'
 import { useAuth } from './AuthContext'
+import { toFundingUpdate, type EscrowBreakdown } from '../lib/escrow'
 
 interface CreateOrderParams {
   threadId: string
@@ -17,20 +18,12 @@ interface CreateOrderParams {
   unitPriceUSD: number
 }
 
-interface EscrowBreakdown {
-  /** The price actually funded at — the negotiated/accepted offer price when funding from a specific counter-offer, otherwise the order's original listing price. Persisted so the order reflects what was actually paid, not the listing price it started at. */
-  unitPriceUSD: number
-  logisticsUSD: number
-  escrowFeeUSD: number
-  totalUSD: number
-  receiptReference: string
-}
-
 interface OrdersContextValue {
   orders: Order[]
   loading: boolean
   createOrder: (params: CreateOrderParams) => Promise<string>
-  fundEscrow: (orderId: string, breakdown: EscrowBreakdown) => void
+  /** Resolves true only once the order's row is confirmed to actually reflect 'Escrow Funded' — never assume success from the absence of an error alone. */
+  fundEscrow: (orderId: string, breakdown: EscrowBreakdown) => Promise<boolean>
   advanceOrder: (orderId: string) => void
   getOrderByThread: (threadId: string) => Order | undefined
 }
@@ -77,22 +70,35 @@ function LocalOrdersProvider({ children }: { children: ReactNode }) {
   )
 
   const fundEscrow = useCallback(
-    (orderId: string, breakdown: EscrowBreakdown) => {
+    // DEFERRED, NOT VERIFIED — 2026-09-03 containment patch: `matched` is
+    // assigned inside the updater function passed to `setOrders`, but React
+    // does not guarantee that updater runs synchronously before this
+    // function's `return matched` executes — under batching it can be
+    // deferred past this point, which would make `matched` read as `false`
+    // even when a real match exists and will be applied moments later. Not
+    // exercised by tests/orders.test.mjs (which covers SupabaseOrdersProvider
+    // only) or by any test in this containment patch. Left as-is because
+    // funding is hard-disabled everywhere `fundEscrow` is called while
+    // ORDER_WRITES_CONTAINED is true — do not treat this as fixed, and fix
+    // it before ever relying on local mode's fundEscrow return value again.
+    async (orderId: string, breakdown: EscrowBreakdown) => {
+      let matched = false
       setOrders((prev) =>
-        prev.map((o) =>
-          o.id === orderId
-            ? {
-                ...o,
-                status: 'Escrow Funded',
-                unitPriceUSD: breakdown.unitPriceUSD,
-                logisticsUSD: breakdown.logisticsUSD,
-                escrowFeeUSD: breakdown.escrowFeeUSD,
-                totalUSD: breakdown.totalUSD,
-                receiptReference: breakdown.receiptReference,
-              }
-            : o,
-        ),
+        prev.map((o) => {
+          if (o.id !== orderId) return o
+          matched = true
+          return {
+            ...o,
+            status: 'Escrow Funded',
+            unitPriceUSD: breakdown.unitPriceUSD,
+            logisticsUSD: breakdown.logisticsUSD,
+            escrowFeeUSD: breakdown.escrowFeeUSD,
+            totalUSD: breakdown.totalUSD,
+            receiptReference: breakdown.receiptReference,
+          }
+        }),
       )
+      return matched
     },
     [setOrders],
   )
@@ -254,19 +260,27 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
     [user, load],
   )
 
-  const fundEscrow = useCallback((orderId: string, breakdown: EscrowBreakdown) => {
-    supabase!
+  const fundEscrow = useCallback(async (orderId: string, breakdown: EscrowBreakdown) => {
+    // `.select()` after `.update()` returns the row PostgREST actually
+    // changed — an update matching zero rows (RLS-blocked, or an unknown
+    // id) returns no `error` at all, so checking the returned row's actual
+    // `escrow_status` is what catches that, not `error === null` alone.
+    const { data, error } = await supabase!
       .from('orders')
-      .update({
-        escrow_status: 'Escrow Funded',
-        unit_price_usd: breakdown.unitPriceUSD,
-        logistics_usd: breakdown.logisticsUSD,
-        escrow_fee_usd: breakdown.escrowFeeUSD,
-        total_amount: breakdown.totalUSD,
-        receipt_reference: breakdown.receiptReference,
-      })
+      .update(toFundingUpdate(breakdown))
       .eq('id', orderId)
-      .then(({ error }) => error && console.error('[OrdersContext] fundEscrow failed', error))
+      .select('escrow_status')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[OrdersContext] fundEscrow failed', error)
+      return false
+    }
+    if (data?.escrow_status !== 'Escrow Funded') {
+      console.error('[OrdersContext] fundEscrow reported no error but changed no row', { orderId, data })
+      return false
+    }
+    return true
   }, [])
 
   const advanceOrder = useCallback(

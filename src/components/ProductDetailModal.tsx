@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useCurrency } from '../context/CurrencyContext'
 import { useMessaging } from '../context/MessagingContext'
 import { useOrders } from '../context/OrdersContext'
+import { guardNewOrder } from '../lib/containment'
 import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
 import { CONVERTER_CURRENCIES, formatMoney, type ConverterCurrency } from '../lib/currency'
 import { formatHarvestDate } from '../lib/dates'
@@ -36,7 +37,8 @@ export default function ProductDetailModal({
   // never actually be contacted there, so disable it up front instead of
   // letting the click silently do nothing.
   const missingFarmerLink = isSupabaseConfigured && !listing.farmerId
-  const contactDisabled = soldOut || missingFarmerLink || contacting
+  const newOrderGuard = guardNewOrder()
+  const contactDisabled = soldOut || missingFarmerLink || contacting || !newOrderGuard.allowed
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -60,6 +62,16 @@ export default function ProductDetailModal({
       userId: user?.id ?? null,
       contactDisabled,
     })
+
+    if (!newOrderGuard.allowed) {
+      // Returns before startThread is ever called — every new conversation
+      // this would create currently ends up with no linked order
+      // (createOrder is RLS-blocked), which is exactly the orphan this
+      // guard exists to prevent. Existing conversations remain fully
+      // readable/messageable from the Messages page, which this doesn't touch.
+      setContactError(newOrderGuard.message ?? null)
+      return
+    }
 
     if (!user) {
       // Give a visible reason before leaving — an instant, silent redirect
@@ -334,16 +346,22 @@ export default function ProductDetailModal({
           >
             {soldOut
               ? 'Sold Out'
-              : contacting
-                ? 'Starting conversation…'
-                : missingFarmerLink
-                  ? 'Not Linked to a Farmer Account'
-                  : 'Request Quote'}
+              : !newOrderGuard.allowed
+                ? 'Temporarily Unavailable'
+                : contacting
+                  ? 'Starting conversation…'
+                  : missingFarmerLink
+                    ? 'Not Linked to a Farmer Account'
+                    : 'Request Quote'}
           </button>
-          {missingFarmerLink && (
-            <p className="mt-1.5 text-xs text-earth-700/60">
-              This listing isn't linked to a farmer account yet, so it can't be contacted directly.
-            </p>
+          {!newOrderGuard.allowed ? (
+            <p className="mt-1.5 text-xs text-earth-700/60">{newOrderGuard.message}</p>
+          ) : (
+            missingFarmerLink && (
+              <p className="mt-1.5 text-xs text-earth-700/60">
+                This listing isn't linked to a farmer account yet, so it can't be contacted directly.
+              </p>
+            )
           )}
         </div>
       </div>

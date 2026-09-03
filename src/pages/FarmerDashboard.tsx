@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { useCrops } from '../context/CropContext'
 import { useOrders } from '../context/OrdersContext'
 import { CERTIFICATION_OPTIONS } from '../data/sellerListings'
+import { guardOrderAdvance } from '../lib/containment'
 import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
 import type { CropCategory, ListingStatus, SellerListing } from '../types'
 import { ORDER_STAGES } from '../types'
@@ -39,6 +40,7 @@ export default function FarmerDashboard() {
   const { user } = useAuth()
   const { listings, addListing, updateListing, updateStatus, deleteListing } = useCrops()
   const { orders, advanceOrder } = useOrders()
+  const advanceGuard = guardOrderAdvance()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
@@ -409,16 +411,24 @@ export default function FarmerDashboard() {
                     </p>
                     <p className="text-sm text-earth-700">Buyer: {order.buyerName}</p>
                   </div>
-                  {canAdvance && (
-                    <button
-                      type="button"
-                      onClick={() => advanceOrder(order.id)}
-                      className="rounded-lg bg-earth-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-earth-700"
-                    >
-                      Advance to{' '}
-                      {ORDER_STAGES[Math.min(ORDER_STAGES.indexOf(order.status) + 1, ORDER_STAGES.length - 1)]}
-                    </button>
-                  )}
+                  {canAdvance &&
+                    (!advanceGuard.allowed ? (
+                      <span
+                        title={advanceGuard.message}
+                        className="rounded-lg bg-sand-100 px-3 py-1.5 text-xs font-semibold text-earth-700/60"
+                      >
+                        Temporarily unavailable
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => advanceOrder(order.id)}
+                        className="rounded-lg bg-earth-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-earth-700"
+                      >
+                        Advance to{' '}
+                        {ORDER_STAGES[Math.min(ORDER_STAGES.indexOf(order.status) + 1, ORDER_STAGES.length - 1)]}
+                      </button>
+                    ))}
                 </div>
                 <div className="mt-4">
                   <OrderStatusTracker status={order.status} />
