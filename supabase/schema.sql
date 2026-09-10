@@ -170,6 +170,15 @@ alter table public.orders drop constraint if exists orders_escrow_status_check;
 alter table public.orders add constraint orders_escrow_status_check
   check (escrow_status in ('Inquiry Sent', 'Escrow Funded', 'Logistics Scheduled', 'Delivered & Released'));
 
+-- Fixes a live column default ('Initiated') that predates the 4-stage
+-- lifecycle above and isn't even one of its allowed values — confirmed via
+-- `supabase db pull --declarative` on 2026-09-10. Harmless as long as every
+-- INSERT sets escrow_status explicitly (LocalOrdersProvider and
+-- SupabaseOrdersProvider.createOrder both already do), but a bare `insert
+-- into orders (...)` that omitted it would violate orders_escrow_status_check
+-- outright rather than silently defaulting to something wrong.
+alter table public.orders alter column escrow_status set default 'Inquiry Sent';
+
 create index if not exists orders_buyer_id_idx on public.orders (buyer_id);
 create index if not exists orders_farmer_id_idx on public.orders (farmer_id);
 
