@@ -11,5 +11,5 @@ export function formatHarvestDate(
   if (!value) return 'Not specified'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Not specified'
-  return date.toLocaleDateString(undefined, options)
+  return date.toLocaleDateString('en-US', options)
 }
