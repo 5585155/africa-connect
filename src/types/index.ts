@@ -3,16 +3,7 @@ export interface WriteResult {
   error?: string
 }
 
-export type Language = 'en' | 'fr' | 'sw' | 'pcm'
-
 export type Role = 'farmer' | 'buyer'
-
-export const LANGUAGES: { code: Language; label: string }[] = [
-  { code: 'en', label: 'English' },
-  { code: 'fr', label: 'Français' },
-  { code: 'sw', label: 'Kiswahili' },
-  { code: 'pcm', label: 'Pidgin' },
-]
 
 export type CropCategory =
   | 'Grains'

@@ -34,11 +34,6 @@ const BUYER_STEPS: Step[] = [
     icon: '🔍',
   },
   {
-    title: 'Request trade samples',
-    description: 'Ask any farmer directly in the message thread to ship a sample before you commit to a full order — there’s no dedicated sample-request feature yet, so this is arranged manually between you.',
-    icon: '📦',
-  },
-  {
     title: 'Negotiate with live rates',
     description: 'Discuss pricing in your own currency with built-in multi-currency conversion.',
     icon: '💱',

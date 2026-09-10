@@ -42,13 +42,6 @@ export const FAQS: Faq[] = [
       'Certifications a farmer lists (GlobalGAP, Fair Trade, Organic, and similar) are self-reported on their profile today — we don’t yet cross-check them against the issuing body’s registry. Ask a farmer to share their certificate directly if you need to confirm one before trading.',
   },
   {
-    id: 'faq-006',
-    category: 'Quality Certification',
-    question: 'Can I request a trade sample before committing?',
-    answer:
-      'There’s no dedicated sample-request feature yet, but you can ask any farmer directly in the message thread attached to a listing — many are open to shipping a small sample at your cost before you commit to a full order.',
-  },
-  {
     id: 'faq-007',
     category: 'Multi-Currency Settlements',
     question: 'Which currencies are supported for settlement?',

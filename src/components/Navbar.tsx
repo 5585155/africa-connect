@@ -2,8 +2,6 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useCurrency } from '../context/CurrencyContext'
 import { CONVERTER_CURRENCIES, type ConverterCurrency } from '../lib/currency'
-import type { Language } from '../types'
-import { LANGUAGES } from '../types'
 import UserMenu from './UserMenu'
 
 const NAV_LINKS = [
@@ -18,7 +16,6 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [regionOpen, setRegionOpen] = useState(false)
   const { currency, setCurrency, source: rateSource } = useCurrency()
-  const [language, setLanguage] = useState<Language>('en')
 
   return (
     <header className="sticky top-0 z-50 bg-earth-800 text-sand-50 shadow-md">
@@ -50,8 +47,6 @@ export default function Navbar() {
             currency={currency}
             setCurrency={setCurrency}
             rateSource={rateSource}
-            language={language}
-            setLanguage={setLanguage}
           />
         </div>
 
@@ -98,8 +93,6 @@ export default function Navbar() {
               currency={currency}
               setCurrency={setCurrency}
               rateSource={rateSource}
-              language={language}
-              setLanguage={setLanguage}
               fullWidth
             />
           </div>
@@ -115,8 +108,6 @@ function RegionDropdown({
   currency,
   setCurrency,
   rateSource,
-  language,
-  setLanguage,
   fullWidth = false,
 }: {
   open: boolean
@@ -124,8 +115,6 @@ function RegionDropdown({
   currency: ConverterCurrency
   setCurrency: (currency: ConverterCurrency) => void
   rateSource: 'live' | 'fallback'
-  language: Language
-  setLanguage: (language: Language) => void
   fullWidth?: boolean
 }) {
   return (
@@ -139,9 +128,7 @@ function RegionDropdown({
           fullWidth ? 'w-full' : ''
         }`}
       >
-        <span>
-          {currency} · {LANGUAGES.find((l) => l.code === language)?.label}
-        </span>
+        <span>{currency}</span>
         <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
         </svg>
@@ -149,54 +136,33 @@ function RegionDropdown({
 
       {open && (
         <div className="absolute right-0 z-10 mt-2 w-64 rounded-lg border border-earth-200 bg-white p-3 text-earth-950 shadow-lg">
-          <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-earth-700">Currency</p>
-              <span
-                className={`flex items-center gap-1 text-[10px] font-medium ${
-                  rateSource === 'live' ? 'text-earth-600' : 'text-clay-600'
-                }`}
-                title={rateSource === 'live' ? 'Live exchange rates' : 'Offline — using static rates'}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${rateSource === 'live' ? 'bg-earth-600' : 'bg-clay-600'}`} />
-                {rateSource === 'live' ? 'Live rates' : 'Static rates'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              {CONVERTER_CURRENCIES.map((c) => (
-                <button
-                  key={c.code}
-                  type="button"
-                  onClick={() => setCurrency(c.code)}
-                  className={`rounded-md px-2 py-1.5 text-left text-sm ${
-                    currency === c.code
-                      ? 'bg-earth-800 text-white'
-                      : 'hover:bg-sand-100'
-                  }`}
-                >
-                  {c.code}
-                </button>
-              ))}
-            </div>
+          <div className="mb-1 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-earth-700">Currency</p>
+            <span
+              className={`flex items-center gap-1 text-[10px] font-medium ${
+                rateSource === 'live' ? 'text-earth-600' : 'text-clay-600'
+              }`}
+              title={rateSource === 'live' ? 'Live exchange rates' : 'Offline — using static rates'}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${rateSource === 'live' ? 'bg-earth-600' : 'bg-clay-600'}`} />
+              {rateSource === 'live' ? 'Live rates' : 'Static rates'}
+            </span>
           </div>
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-earth-700">Language</p>
-            <div className="grid grid-cols-2 gap-1">
-              {LANGUAGES.map((l) => (
-                <button
-                  key={l.code}
-                  type="button"
-                  onClick={() => setLanguage(l.code)}
-                  className={`rounded-md px-2 py-1.5 text-left text-sm ${
-                    language === l.code
-                      ? 'bg-earth-800 text-white'
-                      : 'hover:bg-sand-100'
-                  }`}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-2 gap-1">
+            {CONVERTER_CURRENCIES.map((c) => (
+              <button
+                key={c.code}
+                type="button"
+                onClick={() => setCurrency(c.code)}
+                className={`rounded-md px-2 py-1.5 text-left text-sm ${
+                  currency === c.code
+                    ? 'bg-earth-800 text-white'
+                    : 'hover:bg-sand-100'
+                }`}
+              >
+                {c.code}
+              </button>
+            ))}
           </div>
         </div>
       )}
