@@ -9,8 +9,16 @@ Marketplace connecting African farmers directly with buyers of agricultural prod
 
 ## Structure
 
-- `src/components/` — UI components (`Navbar`, `Hero`)
+- `src/components/` — UI components (`Navbar`, `Hero`, escrow/order UI, charts, etc.)
+- `src/pages/` — routed pages (`Home`, `Marketplace`, `Auth`, `Messages`, `FarmerDashboard`, `BuyerDashboard`, etc.)
+- `src/context/` — React context providers (`AuthContext`, `OrdersContext`, `MessagingContext`, `CropContext`, `CurrencyContext`, `WatchlistContext`)
+- `src/lib/` — client logic (Supabase client/mappers, escrow calculations, payment SDK wrappers, forecasting, containment guards)
+- `src/hooks/` — shared hooks (e.g. `useLocalStorage`)
+- `src/data/` — static/mock data (crops, listings, FAQs, community content)
 - `src/types/` — shared types and constants (currencies, languages, roles)
+- `api/` — Vercel serverless functions (Stripe/Paystack/Flutterwave webhook handlers, Supabase admin client)
+- `supabase/schema.sql` — Postgres schema, RLS policies, and triggers (may drift from the live database — see [PAYMENT_SECURITY_AUDIT.md](PAYMENT_SECURITY_AUDIT.md))
+- `tests/` — Node test runner suites covering escrow math, webhooks, and payment containment
 
 ## Theme
 
