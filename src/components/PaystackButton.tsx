@@ -10,6 +10,10 @@ export interface PaystackButtonProps {
   amount: number
   currency?: string
   userId: string
+  /** Our order id — sent in `metadata.order_id` so api/paystack-webhook.ts can fund the right order. Absent in local mock mode. */
+  orderId?: string
+  /** From createPaymentAttempt() — lets the webhook verify amount/currency before funding. Absent in local mock mode. */
+  paymentAttemptId?: string
   onSuccessCallback?: (reference: string) => void
   label?: string
   className?: string
@@ -22,6 +26,8 @@ export default function PaystackButton({
   amount,
   currency = 'NGN',
   userId,
+  orderId,
+  paymentAttemptId,
   onSuccessCallback,
   label,
   className,
@@ -57,7 +63,7 @@ export default function PaystackButton({
         email,
         amount: Math.round(amount * 100), // main units → kobo/cents
         currency,
-        metadata: { user_id: userId },
+        metadata: { user_id: userId, order_id: orderId, payment_attempt_id: paymentAttemptId },
         onSuccess: (transaction) => {
           setStatus('idle')
           onSuccessCallback?.(transaction.reference)

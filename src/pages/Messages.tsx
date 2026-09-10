@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import EscrowPaymentModal, { type EscrowPaymentResult } from '../components/EscrowPaymentModal'
 import { computeEscrowBreakdown } from '../lib/escrow'
 import { guardPaymentConfirm, guardPaymentStart } from '../lib/containment'
+import { isSupabaseConfigured } from '../lib/supabase'
 import OrderStatusTracker from '../components/OrderStatusTracker'
 import { useAuth } from '../context/AuthContext'
 import { useMessaging } from '../context/MessagingContext'
@@ -123,20 +124,53 @@ export default function Messages() {
 
     // DEFERRED, NOT VERIFIED — 2026-09-03 containment patch: this branch is
     // unreachable while ORDER_WRITES_CONTAINED is true (the guard above
-    // returns first), so it has not been exercised. It also has no
-    // try/catch — if fundEscrow ever rejects (as opposed to resolving
-    // false) this await throws unhandled rather than showing an error.
-    // Fix this before relying on this path again, not just before removing
-    // containment.
+    // returns first), so it has not been exercised.
     const unitPriceUSD = escrowUnitPriceUSD ?? activeOrder.unitPriceUSD
     const { logisticsUSD, escrowFeeUSD, totalUSD } = computeEscrowBreakdown(activeOrder.quantity, unitPriceUSD)
-    const funded = await fundEscrow(activeOrder.id, {
-      unitPriceUSD,
-      logisticsUSD,
-      escrowFeeUSD,
-      totalUSD,
-      receiptReference: result.reference,
-    })
+    const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
+
+    // A real (non-sandbox) confirmation against a live Supabase project does
+    // NOT fund the order from here — that would be exactly the "callbacks and
+    // simulations use the same funded path" flaw PAYMENT_SECURITY_AUDIT.md
+    // flagged as Critical. The actual funding write only happens server-side,
+    // once the payment provider's webhook verifies the amount/currency it
+    // received against the payment attempt this checkout created (see
+    // api/*-webhook.ts) — this client only knows the provider's own callback
+    // fired, not that the money is real. The order's realtime subscription
+    // (OrdersContext.tsx) picks up that write and updates the tracker on its
+    // own once the webhook lands, typically within a few seconds.
+    if (!result.sandbox && isSupabaseConfigured) {
+      try {
+        sendMessage(
+          activeThread.id,
+          `Submitted payment for ${activeOrder.quantity} t ${activeOrder.cropName} via ${gateway} — waiting for confirmation. Receipt: ${result.reference}`,
+          'text',
+        )
+      } finally {
+        setShowEscrowModal(false)
+        setEscrowUnitPriceUSD(null)
+      }
+      return
+    }
+
+    // Sandbox/local-mock path — there is no webhook to confirm this, so this
+    // is the only place escrow ever gets funded, exactly as it did before.
+    let funded: boolean
+    try {
+      funded = await fundEscrow(activeOrder.id, {
+        unitPriceUSD,
+        logisticsUSD,
+        escrowFeeUSD,
+        totalUSD,
+        receiptReference: result.reference,
+      })
+    } catch (error) {
+      console.error('[Messages] fundEscrow threw', error)
+      setAcceptError('Something went wrong recording this payment. Please contact support before paying again.')
+      setShowEscrowModal(false)
+      setEscrowUnitPriceUSD(null)
+      return
+    }
 
     if (!funded) {
       setAcceptError(
@@ -147,7 +181,6 @@ export default function Messages() {
       return
     }
 
-    const gateway = result.method === 'flutterwave' ? 'Flutterwave' : result.method === 'paystack' ? 'Paystack' : 'Stripe'
     sendMessage(
       activeThread.id,
       `Funded escrow trade for ${activeOrder.quantity} t ${activeOrder.cropName} via ${gateway}${

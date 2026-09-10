@@ -11,14 +11,14 @@ export const FAQS: Faq[] = [
     category: 'Logistics',
     question: 'How is delivery coordinated for cross-border orders?',
     answer:
-      'Once a trade is confirmed, our logistics partners coordinate regional trucking or export freight depending on destination. You can track shipment status from your dashboard from pickup through customs clearance.',
+      'Buyer and farmer arrange trucking or export freight directly between themselves, using the messaging thread attached to the order. The dashboard shows the trade’s current stage (inquiry, escrow funded, logistics scheduled, delivered) so both sides can see where things stand, but there is no logistics-partner integration or shipment tracking behind it yet — marking a stage complete is a manual step either party takes.',
   },
   {
     id: 'faq-002',
     category: 'Logistics',
     question: 'What happens if a shipment is delayed at customs?',
     answer:
-      'Our support team is notified automatically and works with local clearing agents. Buyers and farmers are kept updated in real time, and escrow release is paused until delivery is confirmed.',
+      'There is no automated customs-delay detection or notification today — contact support directly and we’ll help from there. What is guaranteed by the order flow itself: escrow funds stay held regardless, and release only happens once the order is marked delivered, so a delay on its own doesn’t put your funds at risk.',
   },
   {
     id: 'faq-003',
@@ -32,21 +32,21 @@ export const FAQS: Faq[] = [
     category: 'Escrow Security',
     question: 'What if the produce doesn’t match the listing?',
     answer:
-      'Buyers can open a dispute before confirming receipt. Our team reviews photo evidence and, where needed, third-party inspection reports before releasing or refunding escrowed funds.',
+      'There is no in-app dispute flow yet — do not confirm receipt, and contact support with what happened and any photos you have. Funds stay in escrow and are not released to the farmer until receipt is confirmed, so raising the issue before confirming is what keeps them protected in the meantime.',
   },
   {
     id: 'faq-005',
     category: 'Quality Certification',
     question: 'How are farmer certifications verified?',
     answer:
-      'Certifications like GlobalGAP, Fair Trade, and Organic status are cross-checked against the issuing body’s public registry before a "Verified" badge is applied to a farmer’s profile.',
+      'Certifications a farmer lists (GlobalGAP, Fair Trade, Organic, and similar) are self-reported on their profile today — we don’t yet cross-check them against the issuing body’s registry. Ask a farmer to share their certificate directly if you need to confirm one before trading.',
   },
   {
     id: 'faq-006',
     category: 'Quality Certification',
     question: 'Can I request a trade sample before committing?',
     answer:
-      'Yes. Every listing supports a sample request. Farmers ship a small sample at buyer cost, letting you verify quality before negotiating a full order.',
+      'There’s no dedicated sample-request feature yet, but you can ask any farmer directly in the message thread attached to a listing — many are open to shipping a small sample at your cost before you commit to a full order.',
   },
   {
     id: 'faq-007',

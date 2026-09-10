@@ -32,7 +32,14 @@ async function render() {
         calls.getStripe.push(args)
         return {}
       },
+      createStripePaymentIntent: async () => 'cs_test_offline_only',
     },
+    // No Supabase project in this harness — the server-authority path
+    // (payment attempts, real Stripe Elements) stays untested here on
+    // purpose; it has no server to call. See tests/webhooks.test.mjs for
+    // that side, and this file's own note above for what it doesn't cover.
+    '../lib/supabase': { isSupabaseConfigured: false },
+    '../lib/paymentAttempts': { createPaymentAttempt: async () => ({ paymentAttemptId: 'pa-test', amount: 274, currency: 'USD' }) },
     './PaystackButton': { default: PaystackButtonMock, isPaystackConfigured: true },
     '../lib/escrow': { computeEscrowBreakdown: () => ({ cropCostUSD: 250, logisticsUSD: 18, escrowFeeUSD: 6, totalUSD: 274 }) },
     '../lib/containment': containment,

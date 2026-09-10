@@ -152,6 +152,91 @@ close an already-open checkout window or direct provider access. The
 Critical/High findings above remain fully open until that sequence is
 actually carried out.
 
+## Addendum — 2026-09-10: implementation sequence items 1-5 built
+
+Items 1-5 of the "Implementation sequence requiring a separate hardening
+pass" above have been implemented in code. This is not the same claim as
+"verified against a real payment provider and a real Postgres instance" —
+see the honest gaps at the end of this addendum before treating any of this
+as cleared for production traffic.
+
+**Item 1 (read live policies, establish payment authority) — schema.sql.**
+Two new tables: `payment_attempts` (the server-computed amount/currency a
+checkout is expected to charge, created by `api/create-payment-attempt.ts`
+before any provider checkout opens — never trusts a client-submitted
+amount) and `processed_webhook_events` (provider + event id, unique —
+the replay guard every webhook now checks first). A new trigger,
+`guard_order_financial_writes`, blocks any `authenticated`-role update to
+`orders.escrow_status` (into `'Escrow Funded'` specifically), `unit_price_usd`,
+`logistics_usd`, `escrow_fee_usd`, `total_amount`, or `receipt_reference` —
+only the `service_role` webhook path may change them. RLS alone can't express
+"compare against the OLD row," which is why this is a trigger, not a policy;
+it runs independently of whatever the `orders` UPDATE policy's `USING`
+clause allows, on purpose. The `orders` INSERT policy now also requires
+`escrow_status = 'Inquiry Sent'` and `receipt_reference is null`, closing the
+"insert an already-funded order" hole item 1's Critical finding described.
+
+**Item 2 (authenticated payment attempts) — `api/create-payment-attempt.ts`.**
+Verifies the caller's Supabase session server-side (`api/_lib/verifyAuth.ts`),
+confirms the order belongs to that buyer and is still `'Inquiry Sent'`, then
+computes the expected charge itself from the order's own stored
+quantity/unit price (via the same `computeEscrowBreakdown` the client uses)
+converted to the requested settlement currency — the client's role is only to
+pick a provider and currency, never to state an amount.
+
+**Item 3 (verify against expectations, handle retries) — all three webhooks.**
+Each of `api/stripe-webhook.ts`, `api/flutterwave-webhook.ts`,
+`api/paystack-webhook.ts` now: claims the event in `processed_webhook_events`
+before doing anything else (a redelivery is a 200 no-op); looks up the
+payment attempt named in the event's metadata and rejects — marking the
+attempt `'failed'`, leaving the order untouched — if the received
+amount/currency doesn't match it; only then updates `orders`. Paystack's
+handler previously stopped at writing `transactions` and never funded the
+order it belonged to (item 4's own finding) — it now does, the same way the
+other two do.
+
+**Item 4 (remove client authority) — the trigger above, plus
+`src/pages/Messages.tsx`.** A real (non-sandbox) provider callback firing
+client-side no longer calls `fundEscrow` itself when a Supabase project is
+configured — that was the exact "callbacks and simulations use the same
+funded path" Critical finding. The client now only posts an informational
+"submitted, awaiting confirmation" message; the order's own realtime
+subscription reflects the webhook's write once it lands. The local-mock
+(no Supabase project) sandbox path is unchanged — there is no webhook to wait
+for there, so it remains the only way escrow gets "funded" in that mode,
+exactly as before.
+
+**Item 5 (Stripe's missing charge path) — `api/create-stripe-intent.ts`.**
+Creates a real `PaymentIntent` from the payment attempt's own
+server-computed amount/currency (never the client's). `EscrowPaymentModal.tsx`
+mounts a real Stripe Card Element and confirms with `stripe.confirmCardPayment`
+once a Supabase project and a Stripe key are both configured; without either,
+it still falls back to the same clearly-labeled simulation as before.
+
+**Adversarial coverage.** The three `AUDIT GAP` reproductions in
+`tests/webhooks.test.mjs` have been replaced with rejection assertions, per
+this doc's own instruction: underpayment against a seeded payment attempt no
+longer funds the order (Stripe and Flutterwave), and a replayed Stripe event
+no longer updates the order a second time. A new test confirms Paystack now
+funds the linked order. 53 tests pass.
+
+**What this addendum does NOT establish — read before relying on any of it.**
+- The offline test harness mocks the Supabase client entirely; it cannot
+  execute real Postgres RLS policies or the new trigger. `guard_order_financial_writes`
+  and the tightened INSERT policy have not been run against a live Postgres
+  instance. Verify them there — e.g. attempt a participant-role update of
+  `escrow_status` to `'Escrow Funded'` directly and confirm it raises.
+- No real Stripe, Flutterwave, or Paystack sandbox account has exercised
+  `create-payment-attempt` → checkout → webhook end to end. The currency-
+  conversion math, minor-unit rounding, and each provider's actual webhook
+  payload shape should be confirmed against their real test modes.
+- The `listing-photos` storage bucket and its policies (see the storage
+  addition to schema.sql) have not been exercised against a live bucket either.
+- `ORDER_WRITES_CONTAINED` in `src/lib/containment.ts` has deliberately been
+  left `true`. Flipping it is a separate, explicit decision — gated on
+  applying the updated `schema.sql` to the actual production project and
+  confirming the above against it, not on this addendum alone.
+
 ## Official guidance consulted
 
 - [Paystack: Accept payments](https://paystack.com/docs/payments/accept-payments/)

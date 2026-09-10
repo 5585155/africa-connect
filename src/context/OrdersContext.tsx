@@ -5,6 +5,7 @@ import { isSchemaMismatchError, rowToOrder, type OrderRow } from '../lib/supabas
 import { ORDER_STAGES, type Order } from '../types'
 import { useAuth } from './AuthContext'
 import { toFundingUpdate, type EscrowBreakdown } from '../lib/escrow'
+import type { WriteResult } from '../types'
 
 interface CreateOrderParams {
   threadId: string
@@ -24,7 +25,7 @@ interface OrdersContextValue {
   createOrder: (params: CreateOrderParams) => Promise<string>
   /** Resolves true only once the order's row is confirmed to actually reflect 'Escrow Funded' — never assume success from the absence of an error alone. */
   fundEscrow: (orderId: string, breakdown: EscrowBreakdown) => Promise<boolean>
-  advanceOrder: (orderId: string) => void
+  advanceOrder: (orderId: string) => Promise<WriteResult>
   getOrderByThread: (threadId: string) => Order | undefined
 }
 
@@ -104,15 +105,18 @@ function LocalOrdersProvider({ children }: { children: ReactNode }) {
   )
 
   const advanceOrder = useCallback(
-    (orderId: string) => {
+    async (orderId: string): Promise<WriteResult> => {
+      let matched = false
       setOrders((prev) =>
         prev.map((o) => {
           if (o.id !== orderId) return o
+          matched = true
           const currentIndex = ORDER_STAGES.indexOf(o.status)
           const nextStage = ORDER_STAGES[Math.min(currentIndex + 1, ORDER_STAGES.length - 1)]
           return { ...o, status: nextStage }
         }),
       )
+      return matched ? {} : { error: 'Could not find this order to advance.' }
     },
     [setOrders],
   )
@@ -284,16 +288,17 @@ function SupabaseOrdersProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const advanceOrder = useCallback(
-    (orderId: string) => {
+    async (orderId: string): Promise<WriteResult> => {
       const order = orders.find((o) => o.id === orderId)
-      if (!order) return
+      if (!order) return { error: 'Could not find this order to advance.' }
       const currentIndex = ORDER_STAGES.indexOf(order.status)
       const nextStage = ORDER_STAGES[Math.min(currentIndex + 1, ORDER_STAGES.length - 1)]
-      supabase!
-        .from('orders')
-        .update({ escrow_status: nextStage })
-        .eq('id', orderId)
-        .then(({ error }) => error && console.error('[OrdersContext] advanceOrder failed', error))
+      const { error } = await supabase!.from('orders').update({ escrow_status: nextStage }).eq('id', orderId)
+      if (error) {
+        console.error('[OrdersContext] advanceOrder failed', error)
+        return { error: 'Could not advance this order. Please try again.' }
+      }
+      return {}
     },
     [orders],
   )

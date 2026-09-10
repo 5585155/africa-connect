@@ -21,7 +21,7 @@ function fixtures() {
   return { thread, order }
 }
 
-async function render({ stateOverrides = [], containmentOverride, fundEscrowResult = true } = {}) {
+async function render({ stateOverrides = [], containmentOverride, fundEscrowResult = true, isSupabaseConfigured = false } = {}) {
   const { thread, order } = fixtures()
   const { react, jsxRuntime } = makeReactMocks({ stateOverrides })
   const calls = { sendMessage: [], fundEscrow: [], setSearchParams: [] }
@@ -44,6 +44,10 @@ async function render({ stateOverrides = [], containmentOverride, fundEscrowResu
       computeEscrowBreakdown: () => ({ logisticsUSD: 18, escrowFeeUSD: 6, totalUSD: 274 }),
     },
     '../lib/containment': containmentOverride ?? containment,
+    // false here keeps every existing test on the local-mode fundEscrow
+    // path this file already exercises — see this file's own real-path
+    // test below for the branch that only exists when this is true.
+    '../lib/supabase': { isSupabaseConfigured },
     '../components/OrderStatusTracker': { default: () => null },
     '../context/AuthContext': {
       useAuth: () => ({ user: { id: 'buyer-1', name: 'Buyer', email: 'b@x.com', role: 'buyer' } }),
@@ -163,4 +167,30 @@ test('handleConfirmEscrow awaits fundEscrow\'s boolean and does not claim succes
 
   assert.equal(calls.fundEscrow.length, 1, 'fundEscrow should have been called and awaited')
   assert.equal(calls.sendMessage.length, 0, 'no "Funded escrow" success message may be posted when fundEscrow resolves false')
+})
+
+test('against a real Supabase project, a real (non-sandbox) confirmation never calls fundEscrow itself', async () => {
+  // This is the fix for PAYMENT_SECURITY_AUDIT.md's "callbacks and
+  // simulations use the same funded path" finding: a real provider
+  // callback firing client-side is not proof of payment — only the
+  // provider's webhook, verified against the payment attempt server-side
+  // (see api/*-webhook.ts), is allowed to write escrow_status. This client
+  // must not fund the order itself just because its own callback fired.
+  const notContained = {
+    ...containment,
+    guardPaymentConfirm: () => ({ allowed: true }),
+  }
+  const { tree, calls } = await render({
+    stateOverrides: [undefined, undefined, undefined, undefined, true],
+    containmentOverride: notContained,
+    isSupabaseConfigured: true,
+  })
+  const modalNode = findAll(tree, (n) => typeof n.props?.onConfirm === 'function')[0]
+  assert.ok(modalNode)
+
+  await modalNode.props.onConfirm({ method: 'flutterwave', reference: 'FLW-REAL-REF', sandbox: false })
+
+  assert.equal(calls.fundEscrow.length, 0, 'fundEscrow must not be called client-side for a real payment')
+  assert.equal(calls.sendMessage.length, 1, 'an informational message should still be posted')
+  assert.match(calls.sendMessage[0][1], /waiting for confirmation/i)
 })

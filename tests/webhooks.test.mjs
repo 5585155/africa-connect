@@ -8,15 +8,44 @@ import { loadModule, plain } from './load-module.mjs'
 const secret = 'offline-test-secret-only'
 const stripe = new Stripe('sk_test_offline_only')
 
-async function setup(provider, result = { data: [{ id: 'test-order' }], error: null }, configured = true) {
+// `options.attempt`, when provided, seeds the one `payment_attempts` row a
+// test's event is allowed to match — { id, amount, currency, status }. This
+// is what api/*-webhook.ts's amount/currency verification checks against
+// (see PAYMENT_SECURITY_AUDIT.md items 2-3); a real deployment reads this row
+// from Postgres, this fake just returns it for any lookup by matching id.
+// `dedupSeen`, shared per app instance, is what makes a redelivered event
+// (same provider + event id) a no-op on the second call.
+async function setup(provider, result = { data: [{ id: 'test-order' }], error: null }, configured = true, options = {}) {
   const writes = []
+  const dedupSeen = new Set()
+  const attempt = options.attempt ?? null
+
   const db = {
     from(table) {
       const query = {
         update(row) { writes.push({ table, row: plain(row), filters: [] }); return query },
         eq(...args) { writes.at(-1).filters.push(args); return query },
         select: async () => result,
-        upsert: async (row, options) => { writes.push({ table, row: plain(row), options: plain(options) }); return result },
+        upsert: async (row, opts) => { writes.push({ table, row: plain(row), options: plain(opts) }); return result },
+        insert: async (row) => {
+          if (table === 'processed_webhook_events') {
+            const key = `${row.provider}:${row.event_id}`
+            if (dedupSeen.has(key)) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+            dedupSeen.add(key)
+            return { data: [row], error: null }
+          }
+          writes.push({ table, row: plain(row) })
+          return { data: [row], error: null }
+        },
+      }
+      if (table === 'payment_attempts') {
+        // Only the one chain shape api/*-webhook.ts actually uses: select(...).eq('id', X).maybeSingle().
+        query.select = () => ({
+          eq: (_col, val) => ({
+            maybeSingle: async () =>
+              attempt && val === attempt.id ? { data: plain(attempt), error: null } : { data: null, error: null },
+          }),
+        })
       }
       return query
     },
@@ -126,27 +155,59 @@ test('Stripe and Flutterwave report unknown order rather than silent success', a
   }
 })
 
-// Audit reproductions: passing means the vulnerability was reproduced, NOT
-// that payments are secure. Replace these with rejection tests when hardened.
-test('AUDIT GAP: Stripe underpayment still issues a funded update', async () => {
-  const app = await setup('stripe')
+test('Paystack now funds the order it belongs to, not just the transactions table', async () => {
+  const attempt = { id: 'pa-paystack-1', amount: 274, currency: 'USD', status: 'pending' }
+  const app = await setup('paystack', { data: [{ id: 'test-order' }], error: null }, true, { attempt })
+  const event = structuredClone(paystackEvent)
+  event.data.metadata = { ...event.data.metadata, order_id: 'test-order', payment_attempt_id: attempt.id }
+
+  assert.equal((await app.send(event)).code, 200)
+  const orderWrite = app.writes.find((w) => w.table === 'orders')
+  assert.ok(orderWrite, 'expected a write to the orders table')
+  assert.equal(orderWrite.row.escrow_status, 'Escrow Funded')
+  const attemptWrite = app.writes.find((w) => w.table === 'payment_attempts')
+  assert.equal(attemptWrite.row.status, 'confirmed')
+})
+
+// Hardening verification — these three replace the AUDIT GAP reproductions
+// PAYMENT_SECURITY_AUDIT.md called for once fixed. Each attaches a real
+// payment_attempts row (as api/create-payment-attempt.ts now always creates
+// before checkout opens) and asserts the vulnerability it used to reproduce
+// no longer funds the order.
+
+test('Stripe: underpayment against the payment attempt is rejected, not funded', async () => {
+  const attempt = { id: 'pa-stripe-under', amount: 274, currency: 'USD', status: 'pending' }
+  const app = await setup('stripe', { data: [{ id: 'test-order' }], error: null }, true, { attempt })
   const event = structuredClone(stripeEvent)
   event.data.object.amount_received = 1
   event.data.object.currency = 'eur'
-  await app.send(event)
-  assert.equal(app.writes[0].row.escrow_status, 'Escrow Funded')
+  event.data.object.metadata.payment_attempt_id = attempt.id
+
+  const res = await app.send(event)
+  assert.equal(res.code, 200)
+  assert.equal(app.writes.some((w) => w.table === 'orders'), false, 'the order must not be funded')
+  const attemptWrite = app.writes.find((w) => w.table === 'payment_attempts')
+  assert.equal(attemptWrite.row.status, 'failed')
 })
 
-test('AUDIT GAP: Flutterwave underpayment still issues a funded update', async () => {
-  const app = await setup('flutterwave')
-  await app.send({ ...flwEvent, data: { ...flwEvent.data, amount: 0.01, currency: 'NGN' } })
-  assert.equal(app.writes[0].row.escrow_status, 'Escrow Funded')
+test('Flutterwave: underpayment against the payment attempt is rejected, not funded', async () => {
+  const attempt = { id: 'pa-flw-under', amount: 274, currency: 'USD', status: 'pending' }
+  const app = await setup('flutterwave', { data: [{ id: 'test-order' }], error: null }, true, { attempt })
+  const event = structuredClone(flwEvent)
+  event.data.amount = 0.01
+  event.data.currency = 'NGN'
+  event.data.meta.payment_attempt_id = attempt.id
+
+  const res = await app.send(event)
+  assert.equal(res.code, 200)
+  assert.equal(app.writes.some((w) => w.table === 'orders'), false, 'the order must not be funded')
+  const attemptWrite = app.writes.find((w) => w.table === 'payment_attempts')
+  assert.equal(attemptWrite.row.status, 'failed')
 })
 
-test('AUDIT GAP: replay updates Stripe order again with no current-status guard', async () => {
+test('Stripe: a replayed event does not update the order a second time', async () => {
   const app = await setup('stripe')
   await app.send(stripeEvent)
   await app.send(stripeEvent)
-  assert.equal(app.writes.length, 2)
-  assert.deepEqual(app.writes[1].filters, [['id', 'test-order']])
+  assert.equal(app.writes.length, 1, 'the second, identical delivery must be a no-op')
 })

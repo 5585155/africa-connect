@@ -1,3 +1,8 @@
+/** Every context write resolves with this instead of firing-and-forgetting, so a caller can show the user what went wrong instead of failing silently to console. */
+export interface WriteResult {
+  error?: string
+}
+
 export type Language = 'en' | 'fr' | 'sw' | 'pcm'
 
 export type Role = 'farmer' | 'buyer'

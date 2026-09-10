@@ -68,6 +68,8 @@ export interface OpenFlutterwaveParams {
   description: string
   /** Our order id — sent as `meta.order_id` so api/flutterwave-webhook.ts can match the charge back to it. */
   orderId: string
+  /** From createPaymentAttempt() — lets the webhook verify amount/currency before funding. Absent in local mock mode. */
+  paymentAttemptId?: string
 }
 
 /** Opens Flutterwave's real inline checkout modal. Resolves with the response on success, or null if the buyer closed it without paying. */
@@ -87,7 +89,7 @@ export async function openFlutterwaveCheckout(params: OpenFlutterwaveParams): Pr
       payment_options: 'card,mobilemoney,ussd,banktransfer',
       customer: { email: params.email, name: params.name },
       customizations: { title: params.title, description: params.description },
-      meta: { order_id: params.orderId },
+      meta: { order_id: params.orderId, payment_attempt_id: params.paymentAttemptId },
       callback: (response) => {
         settled = true
         resolve(response)

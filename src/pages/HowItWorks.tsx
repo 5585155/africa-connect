@@ -11,8 +11,8 @@ const FARMER_STEPS: Step[] = [
     icon: '📋',
   },
   {
-    title: 'Receive verified inquiries',
-    description: 'Only identity-checked buyers can message you, so every inquiry is worth your time.',
+    title: 'Receive buyer inquiries',
+    description: 'Any signed-in buyer can message you about a listing — there’s no identity-verification step yet, so use the same judgment you would with any new trade contact.',
     icon: '✅',
   },
   {
@@ -22,7 +22,7 @@ const FARMER_STEPS: Step[] = [
   },
   {
     title: 'Coordinate delivery',
-    description: 'Arrange regional trucking or export freight with logistics partners built into the platform.',
+    description: 'Arrange trucking or export freight directly with the buyer over the order’s message thread, and mark each stage complete as it happens. There’s no logistics-partner integration yet — freight itself is still coordinated outside the platform.',
     icon: '🚚',
   },
 ]
@@ -30,12 +30,12 @@ const FARMER_STEPS: Step[] = [
 const BUYER_STEPS: Step[] = [
   {
     title: 'Browse verified farms',
-    description: 'Filter by crop, country, certification, and price to find trusted sources fast.',
+    description: 'Filter by crop, country, category, and price to find sources fast. Each listing still shows the farmer’s certifications and verified badge, even though those aren’t filterable criteria yet.',
     icon: '🔍',
   },
   {
     title: 'Request trade samples',
-    description: 'Ask any farmer to ship a sample before you commit to a full order.',
+    description: 'Ask any farmer directly in the message thread to ship a sample before you commit to a full order — there’s no dedicated sample-request feature yet, so this is arranged manually between you.',
     icon: '📦',
   },
   {

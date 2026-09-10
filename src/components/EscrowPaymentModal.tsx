@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useCurrency } from '../context/CurrencyContext'
 import { formatMoney, type ConverterCurrency } from '../lib/currency'
 import { isFlutterwaveConfigured, openFlutterwaveCheckout } from '../lib/flutterwave'
-import { getStripe, isStripeConfigured } from '../lib/stripe'
+import { getStripe, isStripeConfigured, createStripePaymentIntent } from '../lib/stripe'
+import { isSupabaseConfigured } from '../lib/supabase'
+import { createPaymentAttempt } from '../lib/paymentAttempts'
 import PaystackButton, { isPaystackConfigured } from './PaystackButton'
 import { computeEscrowBreakdown } from '../lib/escrow'
 import { guardPaymentStart } from '../lib/containment'
@@ -80,6 +82,18 @@ export default function EscrowPaymentModal({
   const [status, setStatus] = useState<'idle' | 'processing' | 'error'>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // Server-authoritative payment attempt (see src/lib/paymentAttempts.ts) —
+  // only exists against a real Supabase project. Local mock mode has no
+  // server to ask, so it keeps the pre-existing client-only simulation.
+  const [attempt, setAttempt] = useState<{ id: string; amount: number; currency: string } | null>(null)
+  const [attemptLoading, setAttemptLoading] = useState(false)
+  const [attemptError, setAttemptError] = useState<string | null>(null)
+  const cardMountRef = useRef<HTMLDivElement>(null)
+  // Stripe's own StripeCardElement type requires importing @stripe/stripe-js's
+  // full Elements type surface for one local ref — not worth the import noise.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cardElementRef = useRef<any>(null)
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
@@ -93,6 +107,62 @@ export default function EscrowPaymentModal({
   }, [onClose])
 
   const methodIsSandbox = method === 'flutterwave' ? !isFlutterwaveConfigured : method === 'stripe' ? !isStripeConfigured : false
+  const usesServerAuthority = isSupabaseConfigured && method !== null && !methodIsSandbox
+
+  // Creates the server-side payment attempt as soon as a real (non-sandbox)
+  // method is selected, so it's ready before the buyer clicks Pay rather
+  // than adding a round trip to that click.
+  useEffect(() => {
+    setAttempt(null)
+    setAttemptError(null)
+    if (!usesServerAuthority || !method) return
+
+    const attemptCurrency =
+      method === 'flutterwave'
+        ? FLUTTERWAVE_CURRENCIES.includes(currency)
+          ? currency
+          : 'USD'
+        : method === 'paystack'
+          ? paystackCurrency
+          : 'USD'
+
+    let cancelled = false
+    setAttemptLoading(true)
+    createPaymentAttempt(orderId, method, attemptCurrency)
+      .then((result) => {
+        if (!cancelled) setAttempt({ id: result.paymentAttemptId, amount: result.amount, currency: result.currency })
+      })
+      .catch((error) => {
+        if (!cancelled) setAttemptError(error instanceof Error ? error.message : 'Could not start this payment.')
+      })
+      .finally(() => {
+        if (!cancelled) setAttemptLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method, usesServerAuthority])
+
+  // Mounts a real Stripe Card Element once Stripe is the selected method and
+  // this checkout is going through the real (not simulated) path.
+  useEffect(() => {
+    if (method !== 'stripe' || !isStripeConfigured || !usesServerAuthority) return
+    let card: any = null
+    let cancelled = false
+    getStripe().then((stripe) => {
+      if (cancelled || !stripe || !cardMountRef.current) return
+      const elements = stripe.elements()
+      card = elements.create('card', { style: { base: { fontSize: '14px' } } })
+      card.mount(cardMountRef.current)
+      cardElementRef.current = card
+    })
+    return () => {
+      cancelled = true
+      if (card) card.unmount()
+      cardElementRef.current = null
+    }
+  }, [method, usesServerAuthority])
 
   async function handlePay() {
     // Defensive — the button that calls this is not rendered at all while
@@ -112,15 +182,19 @@ export default function EscrowPaymentModal({
     try {
       if (method === 'flutterwave') {
         if (isFlutterwaveConfigured) {
+          if (usesServerAuthority && !attempt) {
+            throw new Error(attemptError ?? 'Still preparing this payment — try again in a moment.')
+          }
           const flwCurrency = FLUTTERWAVE_CURRENCIES.includes(currency) ? currency : 'USD'
           const response = await openFlutterwaveCheckout({
-            amount: Math.round(convert(totalUSD, 'USD', flwCurrency) * 100) / 100,
-            currency: flwCurrency,
+            amount: attempt?.amount ?? Math.round(convert(totalUSD, 'USD', flwCurrency) * 100) / 100,
+            currency: attempt?.currency ?? flwCurrency,
             email: user?.email ?? 'buyer@example.com',
             name: user?.name ?? 'Africa Connect Buyer',
             title: `Escrow — ${quantity} t ${cropName}`,
             description: 'Africa Connect protected escrow trade',
             orderId,
+            paymentAttemptId: attempt?.id,
           })
           if (!response || response.status !== 'successful') {
             setStatus('idle')
@@ -142,14 +216,32 @@ export default function EscrowPaymentModal({
       }
 
       // Stripe
+      if (isStripeConfigured && usesServerAuthority) {
+        if (!attempt) throw new Error(attemptError ?? 'Still preparing this payment — try again in a moment.')
+        const stripe = await getStripe()
+        const card = cardElementRef.current
+        if (!stripe || !card) throw new Error('Stripe failed to load')
+
+        const clientSecret = await createStripePaymentIntent(attempt.id)
+        const { paymentIntent, error } = await stripe.confirmCardPayment(clientSecret, {
+          payment_method: { card },
+        })
+        if (error) throw new Error(error.message || 'Your card was declined.')
+        if (paymentIntent?.status !== 'succeeded') {
+          throw new Error(`Payment status: ${paymentIntent?.status ?? 'unknown'} — it did not complete.`)
+        }
+        onConfirm({ method: 'stripe', reference: paymentIntent.id, sandbox: false })
+        return
+      }
+
+      // Sandbox — no VITE_STRIPE_PUBLIC_KEY configured, or no Supabase project to verify against
       if (isStripeConfigured) {
         const stripe = await getStripe()
         if (!stripe) throw new Error('Stripe failed to load')
-        // No backend is available to create a PaymentIntent/Checkout Session,
-        // so a real charge can't be confirmed from the client alone. The SDK
-        // load above proves the key is valid; the charge itself is simulated.
-        // api/stripe-webhook.ts is ready to receive payment_intent.succeeded
-        // once a create-intent endpoint exists to set metadata.order_id.
+        // The SDK load above proves the key is valid, but with no Supabase
+        // project there's no server to create a real PaymentIntent against
+        // (see api/create-stripe-intent.ts) or a webhook to fund the order
+        // once paid — so the charge itself is still simulated here.
       }
       await new Promise((resolve) => window.setTimeout(resolve, 1100))
       onConfirm({
@@ -160,11 +252,11 @@ export default function EscrowPaymentModal({
     } catch (error) {
       console.error('[EscrowPaymentModal] payment failed', error)
       setStatus('error')
-      setErrorMessage('Something went wrong starting the payment. Please try again.')
+      setErrorMessage(error instanceof Error ? error.message : 'Something went wrong starting the payment. Please try again.')
     }
   }
 
-  const canPay = complianceChecked && method !== null && status !== 'processing'
+  const canPay = complianceChecked && method !== null && status !== 'processing' && !(usesServerAuthority && attemptLoading)
   const paymentStartGuard = guardPaymentStart()
 
   return (
@@ -305,10 +397,36 @@ export default function EscrowPaymentModal({
                 simulate a successful payment so you can test the escrow flow end to end.
               </p>
             )}
+            {method === 'stripe' && isStripeConfigured && !isSupabaseConfigured && (
+              <p className="mt-2 rounded-lg bg-sand-50 p-2.5 text-xs text-earth-700">
+                🧪 No Supabase project connected — the Stripe key loads, but there's no server to create a real
+                charge or webhook to confirm it, so this will simulate a successful payment.
+              </p>
+            )}
+            {method === 'stripe' && isStripeConfigured && usesServerAuthority && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-xs font-semibold text-earth-800">Card details</p>
+                <div ref={cardMountRef} className="rounded-lg border border-sand-200 px-3 py-2.5" />
+                {attemptLoading && <p className="mt-1.5 text-xs text-earth-700/70">Preparing secure payment…</p>}
+                {attemptError && (
+                  <p role="alert" className="mt-1.5 text-xs text-clay-700">
+                    {attemptError}
+                  </p>
+                )}
+              </div>
+            )}
             {method === 'paystack' && !isPaystackConfigured && (
               <p className="mt-2 rounded-lg bg-sand-50 p-2.5 text-xs text-earth-700">
                 ⚠️ No VITE_PAYSTACK_PUBLIC_KEY configured on this deployment — Paystack has no built-in simulation,
                 so a pk_test_... key is needed to test this path.
+              </p>
+            )}
+            {method === 'paystack' && isPaystackConfigured && usesServerAuthority && attemptLoading && (
+              <p className="mt-2 rounded-lg bg-sand-50 p-2.5 text-xs text-earth-700">Preparing secure payment…</p>
+            )}
+            {method === 'paystack' && attemptError && (
+              <p role="alert" className="mt-2 text-xs text-clay-700">
+                {attemptError}
               </p>
             )}
           </div>
@@ -335,11 +453,13 @@ export default function EscrowPaymentModal({
             {method === 'paystack' ? (
               <PaystackButton
                 className="flex-1"
-                disabled={!complianceChecked}
+                disabled={!complianceChecked || (usesServerAuthority && (attemptLoading || !attempt))}
                 email={user?.email ?? ''}
-                amount={paystackAmount}
-                currency={paystackCurrency}
+                amount={attempt?.amount ?? paystackAmount}
+                currency={attempt?.currency ?? paystackCurrency}
                 userId={user?.id ?? user?.email ?? ''}
+                orderId={orderId}
+                paymentAttemptId={attempt?.id}
                 label="Pay with Paystack"
                 onSuccessCallback={(reference) => onConfirm({ method: 'paystack', reference, sandbox: false })}
               />

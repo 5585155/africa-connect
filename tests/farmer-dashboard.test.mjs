@@ -25,18 +25,28 @@ async function render() {
       useAuth: () => ({ user: { id: 'farmer-1', name: 'Test Farmer', email: 'f@x.com', role: 'farmer' } }),
     },
     '../context/CropContext': {
-      useCrops: () => ({ listings: [], addListing: () => {}, updateListing: () => {}, updateStatus: () => {}, deleteListing: () => {} }),
+      useCrops: () => ({
+        listings: [],
+        addListing: async () => ({}),
+        updateListing: async () => ({}),
+        updateStatus: async () => ({}),
+        deleteListing: async () => ({}),
+      }),
     },
     '../context/OrdersContext': {
       useOrders: () => ({
         orders: [order],
-        advanceOrder: (...args) => calls.advanceOrder.push(args),
+        advanceOrder: async (...args) => {
+          calls.advanceOrder.push(args)
+          return {}
+        },
       }),
     },
     '../data/sellerListings': { CERTIFICATION_OPTIONS: [] },
     '../types': { ORDER_STAGES: ['Inquiry Sent', 'Escrow Funded', 'Logistics Scheduled', 'Delivered & Released'] },
     '../lib/containment': containment,
     '../lib/cropVisuals': { cropFallbackIcon: () => '🌱', isImageSource: () => false },
+    '../lib/supabase': { isSupabaseConfigured: false, supabase: null },
   })
 
   const tree = module.default({})

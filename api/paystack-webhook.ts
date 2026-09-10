@@ -24,12 +24,22 @@ async function readRawBody(req: VercelRequest): Promise<Buffer> {
 interface PaystackChargeSuccessPayload {
   event?: string
   data?: {
+    id?: number
     reference?: string
     amount?: number
     currency?: string
     customer?: { email?: string }
-    metadata?: { user_id?: string } | null
+    metadata?: { user_id?: string; order_id?: string; payment_attempt_id?: string } | null
   }
+}
+
+/** True the first time this exact transaction has been seen — false (already processed) on a replay. */
+async function claimEvent(supabaseAdmin: ReturnType<typeof getSupabaseAdmin>, eventId: string): Promise<boolean> {
+  const { error } = await supabaseAdmin!.from('processed_webhook_events').insert({ provider: 'paystack', event_id: eventId })
+  if (!error) return true
+  if (error.code === '23505') return false
+  console.error('[paystack-webhook] failed to record processed event, continuing anyway', eventId, error)
+  return true
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -81,6 +91,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const reference = data?.reference
   const email = data?.customer?.email
   const userId = data?.metadata?.user_id
+  const orderId = data?.metadata?.order_id
+  const paymentAttemptId = data?.metadata?.payment_attempt_id
 
   if (!reference || typeof data?.amount !== 'number' || !email) {
     console.warn('[paystack-webhook] charge.success with missing reference/amount/email', reference)
@@ -93,27 +105,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Database is not configured on this deployment' })
   }
 
+  const eventId = data.id != null ? String(data.id) : reference
+  const isNewEvent = await claimEvent(supabaseAdmin, eventId)
+  if (!isNewEvent) {
+    return res.status(200).json({ received: true, ignored: 'already processed' })
+  }
+
   // Paystack may resend the same event — upsert on the unique `reference` so
   // a retry updates the existing row instead of failing on a duplicate key.
-  const { error } = await supabaseAdmin
-    .from('transactions')
-    .upsert(
-      {
-        reference,
-        provider: 'paystack',
-        user_id: userId ?? null,
-        email,
-        amount: data.amount / 100,
-        currency: data.currency ?? 'NGN',
-        status: 'success',
-        raw_event: payload,
-      },
-      { onConflict: 'reference' },
-    )
+  // This is receipt bookkeeping, not the payment-authority check below.
+  const { error: txError } = await supabaseAdmin.from('transactions').upsert(
+    {
+      reference,
+      provider: 'paystack',
+      user_id: userId ?? null,
+      email,
+      amount: data.amount / 100,
+      currency: data.currency ?? 'NGN',
+      status: 'success',
+      raw_event: payload,
+    },
+    { onConflict: 'reference' },
+  )
 
-  if (error) {
-    console.error('[paystack-webhook] failed to write transaction', reference, error)
+  if (txError) {
+    console.error('[paystack-webhook] failed to write transaction', reference, txError)
     return res.status(500).json({ error: 'Failed to record transaction' })
+  }
+
+  // Previously this webhook stopped here — it recorded the receipt but never
+  // funded the order it belonged to (PAYMENT_SECURITY_AUDIT.md's "Paystack
+  // receipt recording is disconnected from orders" finding). It now finishes
+  // the same way the other two providers do, once there's an order_id to act on.
+  if (!orderId) {
+    console.warn('[paystack-webhook] charge.success with no order_id in metadata — receipt recorded, no order to fund', reference)
+    return res.status(200).json({ received: true, skipped: 'no order_id in metadata' })
+  }
+
+  if (paymentAttemptId) {
+    const { data: attempt, error: attemptError } = await supabaseAdmin
+      .from('payment_attempts')
+      .select('id, amount, currency, status')
+      .eq('id', paymentAttemptId)
+      .maybeSingle()
+
+    if (attemptError || !attempt) {
+      console.error('[paystack-webhook] charge references an unknown payment_attempt_id', paymentAttemptId, attemptError)
+      return res.status(200).json({ received: true, skipped: 'unknown payment_attempt_id' })
+    }
+    if (attempt.status !== 'pending') {
+      console.warn('[paystack-webhook] payment_attempt already', attempt.status, paymentAttemptId)
+      return res.status(200).json({ received: true, skipped: `payment attempt already ${attempt.status}` })
+    }
+
+    const receivedAmount = data.amount / 100
+    const receivedCurrency = (data.currency ?? '').toUpperCase()
+    const amountMatches = Math.abs(receivedAmount - Number(attempt.amount)) < 0.01
+    const currencyMatches = receivedCurrency === attempt.currency
+
+    if (!amountMatches || !currencyMatches) {
+      console.error(
+        '[paystack-webhook] SECURITY: payment amount/currency did not match the expected payment attempt — not funding',
+        { paymentAttemptId, orderId, expected: { amount: attempt.amount, currency: attempt.currency }, received: { amount: receivedAmount, currency: receivedCurrency } },
+      )
+      await supabaseAdmin.from('payment_attempts').update({ status: 'failed' }).eq('id', paymentAttemptId)
+      return res.status(200).json({ received: true, rejected: 'amount/currency mismatch' })
+    }
+
+    await supabaseAdmin
+      .from('payment_attempts')
+      .update({ status: 'confirmed', provider_reference: reference, confirmed_at: new Date().toISOString() })
+      .eq('id', paymentAttemptId)
+  } else {
+    console.warn('[paystack-webhook] charge has no payment_attempt_id — funding without amount verification', reference)
+  }
+
+  const { data: updated, error: orderError } = await supabaseAdmin
+    .from('orders')
+    .update({ escrow_status: 'Escrow Funded', receipt_reference: reference })
+    .eq('id', orderId)
+    .select()
+
+  if (orderError) {
+    console.error('[paystack-webhook] failed to update order', orderId, orderError)
+    return res.status(500).json({ error: 'Failed to update order' })
+  }
+  if (!updated || updated.length === 0) {
+    console.error('[paystack-webhook] charge.success referenced an unknown order_id', orderId)
+    return res.status(404).json({ error: 'Order not found for order_id' })
   }
 
   return res.status(200).json({ received: true })

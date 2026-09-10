@@ -3,7 +3,7 @@ import { CROPS } from '../data/crops'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import { listingToRow, rowToListing, type CropListingRow } from '../lib/supabaseMappers'
-import type { ListingStatus, SellerListing } from '../types'
+import type { ListingStatus, SellerListing, WriteResult } from '../types'
 import { useAuth } from './AuthContext'
 
 const SEED_LISTINGS: SellerListing[] = CROPS.map((crop) => ({ ...crop, status: 'Available' }))
@@ -11,10 +11,10 @@ const SEED_LISTINGS: SellerListing[] = CROPS.map((crop) => ({ ...crop, status: '
 interface CropContextValue {
   listings: SellerListing[]
   loading: boolean
-  addListing: (listing: SellerListing) => void
-  updateListing: (id: string, patch: Partial<SellerListing>) => void
-  updateStatus: (id: string, status: ListingStatus) => void
-  deleteListing: (id: string) => void
+  addListing: (listing: SellerListing) => Promise<WriteResult>
+  updateListing: (id: string, patch: Partial<SellerListing>) => Promise<WriteResult>
+  updateStatus: (id: string, status: ListingStatus) => Promise<WriteResult>
+  deleteListing: (id: string) => Promise<WriteResult>
 }
 
 const CropContext = createContext<CropContextValue | null>(null)
@@ -27,10 +27,22 @@ function LocalCropProvider({ children }: { children: ReactNode }) {
     () => ({
       listings,
       loading: false,
-      addListing: (listing) => setListings((prev) => [listing, ...prev]),
-      updateListing: (id, patch) => setListings((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l))),
-      updateStatus: (id, status) => setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status } : l))),
-      deleteListing: (id) => setListings((prev) => prev.filter((l) => l.id !== id)),
+      addListing: async (listing) => {
+        setListings((prev) => [listing, ...prev])
+        return {}
+      },
+      updateListing: async (id, patch) => {
+        setListings((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+        return {}
+      },
+      updateStatus: async (id, status) => {
+        setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status } : l)))
+        return {}
+      },
+      deleteListing: async (id) => {
+        setListings((prev) => prev.filter((l) => l.id !== id))
+        return {}
+      },
     }),
     [listings, setListings],
   )
@@ -129,17 +141,19 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
   }, [user])
 
   const addListing = useCallback(
-    (listing: SellerListing) => {
-      if (!user?.id) return
-      supabase!
-        .from('crop_listings')
-        .insert(listingToRow(listing, user.id))
-        .then(({ error }) => error && console.error('[CropContext] addListing failed', error))
+    async (listing: SellerListing): Promise<WriteResult> => {
+      if (!user?.id) return { error: 'You need to be signed in to add a listing.' }
+      const { error } = await supabase!.from('crop_listings').insert(listingToRow(listing, user.id))
+      if (error) {
+        console.error('[CropContext] addListing failed', error)
+        return { error: 'Could not save this listing. Please try again.' }
+      }
+      return {}
     },
     [user],
   )
 
-  const updateListing = useCallback((id: string, patch: Partial<SellerListing>) => {
+  const updateListing = useCallback(async (id: string, patch: Partial<SellerListing>): Promise<WriteResult> => {
     const row: Record<string, unknown> = {}
     if (patch.cropName !== undefined) row.crop_name = patch.cropName
     if (patch.category !== undefined) row.category = patch.category
@@ -151,27 +165,30 @@ function SupabaseCropProvider({ children }: { children: ReactNode }) {
     if (patch.harvestDate !== undefined) row.harvest_date = patch.harvestDate || null
     if (patch.status !== undefined) row.status = patch.status
 
-    supabase!
-      .from('crop_listings')
-      .update(row)
-      .eq('id', id)
-      .then(({ error }) => error && console.error('[CropContext] updateListing failed', error))
+    const { error } = await supabase!.from('crop_listings').update(row).eq('id', id)
+    if (error) {
+      console.error('[CropContext] updateListing failed', error)
+      return { error: 'Could not save your changes. Please try again.' }
+    }
+    return {}
   }, [])
 
-  const updateStatus = useCallback((id: string, status: ListingStatus) => {
-    supabase!
-      .from('crop_listings')
-      .update({ status })
-      .eq('id', id)
-      .then(({ error }) => error && console.error('[CropContext] updateStatus failed', error))
+  const updateStatus = useCallback(async (id: string, status: ListingStatus): Promise<WriteResult> => {
+    const { error } = await supabase!.from('crop_listings').update({ status }).eq('id', id)
+    if (error) {
+      console.error('[CropContext] updateStatus failed', error)
+      return { error: 'Could not update this listing’s status. Please try again.' }
+    }
+    return {}
   }, [])
 
-  const deleteListing = useCallback((id: string) => {
-    supabase!
-      .from('crop_listings')
-      .delete()
-      .eq('id', id)
-      .then(({ error }) => error && console.error('[CropContext] deleteListing failed', error))
+  const deleteListing = useCallback(async (id: string): Promise<WriteResult> => {
+    const { error } = await supabase!.from('crop_listings').delete().eq('id', id)
+    if (error) {
+      console.error('[CropContext] deleteListing failed', error)
+      return { error: 'Could not delete this listing. Please try again.' }
+    }
+    return {}
   }, [])
 
   const value = useMemo<CropContextValue>(

@@ -7,6 +7,7 @@ import { useOrders } from '../context/OrdersContext'
 import { CERTIFICATION_OPTIONS } from '../data/sellerListings'
 import { guardOrderAdvance } from '../lib/containment'
 import { cropFallbackIcon, isImageSource } from '../lib/cropVisuals'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import type { CropCategory, ListingStatus, SellerListing } from '../types'
 import { ORDER_STAGES } from '../types'
 
@@ -43,6 +44,9 @@ export default function FarmerDashboard() {
   const advanceGuard = guardOrderAdvance()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<string | null>(null)
+  const [imageUploading, setImageUploading] = useState(false)
 
   const myListings = useMemo(
     () => listings.filter((l) => (user?.id ? l.farmerId === user.id : l.farmerName === user?.name)),
@@ -80,46 +84,76 @@ export default function FarmerDashboard() {
     }))
   }
 
-  function handleImageChange(file: File | undefined) {
+  async function handleImageChange(file: File | undefined) {
     if (!file) return
+    setFormError(null)
+
+    // Against a real Supabase project, photos go into the listing-photos
+    // storage bucket (supabase/schema.sql) instead of being embedded as a
+    // base64 data-URL straight into crop_listings.image_url — see
+    // PAYMENT_SECURITY_AUDIT.md's follow-up item on that not scaling. Local
+    // mock mode has no bucket to upload to, so it keeps the old behavior.
+    if (isSupabaseConfigured && user?.id) {
+      setImageUploading(true)
+      try {
+        const path = `${user.id}/${Date.now()}-${file.name}`
+        const { error: uploadError } = await supabase!.storage.from('listing-photos').upload(path, file, {
+          cacheControl: '3600',
+          upsert: false,
+        })
+        if (uploadError) throw uploadError
+        const { data } = supabase!.storage.from('listing-photos').getPublicUrl(path)
+        setForm((f) => ({ ...f, image: data.publicUrl }))
+      } catch (error) {
+        console.error('[FarmerDashboard] listing photo upload failed', error)
+        setFormError('Could not upload this photo. Please try again.')
+      } finally {
+        setImageUploading(false)
+      }
+      return
+    }
+
     const reader = new FileReader()
     reader.onload = () => setForm((f) => ({ ...f, image: reader.result as string }))
     reader.readAsDataURL(file)
   }
 
-  function handleSubmit(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault()
+    setFormError(null)
     const quantity = Number(form.quantity)
     const unitPrice = Number(form.unitPrice)
     if (!form.cropName || !form.originCountry || !form.harvestDate || quantity <= 0 || unitPrice <= 0) return
 
-    if (editingId) {
-      updateListing(editingId, {
-        cropName: form.cropName,
-        category: form.category,
-        availableQuantity: quantity,
-        unitPriceUSD: unitPrice,
-        harvestDate: form.harvestDate,
-        originCountry: form.originCountry,
-        certifications: form.certifications,
-        ...(form.image ? { image: form.image } : {}),
-      })
-    } else {
-      const newListing: SellerListing = {
-        id: `seller-${Date.now()}`,
-        cropName: form.cropName,
-        category: form.category,
-        originCountry: form.originCountry,
-        availableQuantity: quantity,
-        unitPriceUSD: unitPrice,
-        farmerName: user?.name ?? 'You',
-        verifiedStatus: false,
-        harvestDate: form.harvestDate,
-        image: form.image || '🌱',
-        certifications: form.certifications,
-        status: 'Available',
-      }
-      addListing(newListing)
+    const result = editingId
+      ? await updateListing(editingId, {
+          cropName: form.cropName,
+          category: form.category,
+          availableQuantity: quantity,
+          unitPriceUSD: unitPrice,
+          harvestDate: form.harvestDate,
+          originCountry: form.originCountry,
+          certifications: form.certifications,
+          ...(form.image ? { image: form.image } : {}),
+        })
+      : await addListing({
+          id: `seller-${Date.now()}`,
+          cropName: form.cropName,
+          category: form.category,
+          originCountry: form.originCountry,
+          availableQuantity: quantity,
+          unitPriceUSD: unitPrice,
+          farmerName: user?.name ?? 'You',
+          verifiedStatus: false,
+          harvestDate: form.harvestDate,
+          image: form.image || '🌱',
+          certifications: form.certifications,
+          status: 'Available',
+        } satisfies SellerListing)
+
+    if (result.error) {
+      setFormError(result.error)
+      return
     }
 
     resetForm()
@@ -140,10 +174,27 @@ export default function FarmerDashboard() {
     document.getElementById('listing-form')?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
     if (!window.confirm('Delete this listing? This cannot be undone.')) return
-    deleteListing(id)
+    setRowError(null)
+    const result = await deleteListing(id)
+    if (result.error) {
+      setRowError(result.error)
+      return
+    }
     if (editingId === id) resetForm()
+  }
+
+  async function handleStatusChange(id: string, status: ListingStatus) {
+    setRowError(null)
+    const result = await updateStatus(id, status)
+    if (result.error) setRowError(result.error)
+  }
+
+  async function handleAdvance(orderId: string) {
+    setRowError(null)
+    const result = await advanceOrder(orderId)
+    if (result.error) setRowError(result.error)
   }
 
   return (
@@ -168,6 +219,12 @@ export default function FarmerDashboard() {
 
       <div id="listing-form" className="mt-10 rounded-2xl border border-sand-200 bg-white p-6">
         <h2 className="text-lg font-bold text-earth-950">{editingId ? 'Edit Listing' : 'New Crop Listing'}</h2>
+
+        {formError && (
+          <p role="alert" className="mt-3 rounded-lg bg-clay-600/10 px-3 py-2 text-sm text-clay-700">
+            {formError}
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
@@ -295,16 +352,19 @@ export default function FarmerDashboard() {
                 id="image"
                 type="file"
                 accept="image/*"
+                disabled={imageUploading}
                 onChange={(e) => handleImageChange(e.target.files?.[0])}
                 className="text-sm text-earth-700"
               />
+              {imageUploading && <span className="text-xs text-earth-700/70">Uploading…</span>}
             </div>
           </div>
 
           <div className="flex gap-3 sm:col-span-2">
             <button
               type="submit"
-              className="rounded-xl bg-earth-800 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-earth-700"
+              disabled={imageUploading}
+              className="rounded-xl bg-earth-800 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-earth-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {editingId ? 'Update Listing' : 'Add Listing'}
             </button>
@@ -323,6 +383,11 @@ export default function FarmerDashboard() {
 
       <div className="mt-10">
         <h2 className="mb-4 text-lg font-bold text-earth-950">My Listings</h2>
+        {rowError && (
+          <p role="alert" className="mb-3 rounded-lg bg-clay-600/10 px-3 py-2 text-sm text-clay-700">
+            {rowError}
+          </p>
+        )}
         <div className="overflow-x-auto rounded-2xl border border-sand-200 bg-white">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -354,7 +419,7 @@ export default function FarmerDashboard() {
                   <td className="px-4 py-3">
                     <select
                       value={listing.status}
-                      onChange={(e) => updateStatus(listing.id, e.target.value as ListingStatus)}
+                      onChange={(e) => handleStatusChange(listing.id, e.target.value as ListingStatus)}
                       className="rounded-lg border border-sand-200 bg-white px-2 py-1 text-xs font-medium text-earth-800 outline-none focus:border-earth-600"
                     >
                       {STATUSES.map((s) => (
@@ -422,7 +487,7 @@ export default function FarmerDashboard() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => advanceOrder(order.id)}
+                        onClick={() => handleAdvance(order.id)}
                         className="rounded-lg bg-earth-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-earth-700"
                       >
                         Advance to{' '}
