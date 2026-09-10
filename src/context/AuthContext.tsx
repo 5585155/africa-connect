@@ -79,17 +79,25 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 // ── Local mock storage — no real password check, just remembers who you are ─
 function LocalAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useLocalStorage<AuthUser | null>('ac-user', null)
+  // logout() clears `user`, so the display name typed at sign-up would
+  // otherwise be lost the next time this email logs back in. This directory
+  // survives logout and lets signIn recover it instead of falling back to
+  // an email-derived name every time.
+  const [knownNames, setKnownNames] = useLocalStorage<Record<string, string>>('ac-known-names', {})
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       loading: false,
       signUp: async ({ name, email, role }) => {
-        setUser({ name: name.trim() || email.split('@')[0] || 'there', email, role })
+        const resolvedName = name.trim() || email.split('@')[0] || 'there'
+        setUser({ name: resolvedName, email, role })
+        setKnownNames((prev) => ({ ...prev, [email.toLowerCase()]: resolvedName }))
         return { role }
       },
       signIn: async ({ email, role = 'buyer' }) => {
-        setUser((prev) => ({ name: prev?.name || email.split('@')[0] || 'there', email, role }))
+        const name = knownNames[email.toLowerCase()] || email.split('@')[0] || 'there'
+        setUser({ name, email, role })
         return { role }
       },
       resendConfirmation: async () => ({}),
@@ -99,7 +107,7 @@ function LocalAuthProvider({ children }: { children: ReactNode }) {
       },
       logout: () => setUser(null),
     }),
-    [user, setUser],
+    [user, setUser, knownNames, setKnownNames],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
